@@ -200,6 +200,17 @@ def parse_args():
         help="Proposal §3.3: L_anatomy = ||M_token - M_prior||²"
     )
     p.add_argument(
+        "--anatomical_prior_path",
+        default=None,
+        help="Path to atlas mask NIfTI (e.g. hippocampus ROI) for anatomically grounded prior. If unset, uses spatial center prior."
+    )
+    p.add_argument(
+        "--anatomical_prior_slice",
+        type=int,
+        default=None,
+        help="Slice index for anatomical mask (default: middle). Used with --anatomical_prior_path."
+    )
+    p.add_argument(
         "--lambda_anatomy",
         type=float,
         default=0.0,
@@ -508,6 +519,8 @@ def main():
         enable_early_exit=args.early_exit,
         exit_blocks=tuple(args.exit_blocks),
         use_anatomical_prior=args.use_anatomical_prior,
+        anatomical_prior_path=args.anatomical_prior_path,
+        anatomical_prior_slice=args.anatomical_prior_slice,
         gumbel_tau=args.gumbel_tau if args.thin_method == "learnable" else 0.0,
         pretrained=not args.no_pretrained,
     ).to(device)
@@ -521,6 +534,9 @@ def main():
             debug_thin=False,
             enable_early_exit=args.teacher_early_exit,
             exit_blocks=tuple(args.exit_blocks),
+            use_anatomical_prior=args.use_anatomical_prior,
+            anatomical_prior_path=args.anatomical_prior_path,
+            anatomical_prior_slice=args.anatomical_prior_slice,
             pretrained=not args.no_pretrained,
         ).to(device)
         ckpt = torch.load(args.teacher_ckpt, map_location=device)
@@ -658,6 +674,8 @@ def main():
         "tau": args.tau,
         "tau_u": args.tau_u,
         "use_anatomical_prior": args.use_anatomical_prior,
+        "anatomical_prior_path": args.anatomical_prior_path,
+        "anatomical_prior_slice": args.anatomical_prior_slice,
         "distill": args.teacher_ckpt is not None,
         "teacher_ckpt": args.teacher_ckpt,
         "distill_temp": args.distill_temp,

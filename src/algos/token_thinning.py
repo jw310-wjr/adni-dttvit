@@ -2,8 +2,13 @@
 """
 Token thinning methods for JSD-ViT (Joint Spatial-Depth Adaptive ViT).
 
-Proposal: Learnable ScoreHead + Gumbel-Softmax Top-K (train) / hard Top-K (inference).
+Proposal: Learnable ScoreHead + approximate differentiable Top-K (train) / hard Top-K (inference).
 Heuristic baselines: L2, Attn, Random for ablation.
+
+Note (Proposal §3.4): Our implementation uses "hard top-k + soft reweight" with straight-through:
+  forward = hard top-k selection; backward = Gumbel-Softmax weights on selected tokens.
+  This is an approximate differentiable Top-K relaxation, not a strictly fully differentiable
+  soft top-k selection. Paper should describe as "approximate differentiable Top-K".
 """
 from __future__ import annotations
 
@@ -97,7 +102,7 @@ def _compute_k(N: int, keep_ratio: float) -> int:
 
 
 # -------------------------
-# Gumbel-Softmax for differentiable Top-K (Proposal §3.4)
+# Gumbel-Softmax for approximate differentiable Top-K (Proposal §3.4)
 # -------------------------
 def _gumbel_softmax_weights(scores: torch.Tensor, tau: float = 1.0) -> torch.Tensor:
     """Gumbel-Softmax: soft weights for differentiable selection. scores: [B, N] -> [B, N]"""
@@ -117,8 +122,9 @@ def thin_tokens_learnable(
 ) -> torch.Tensor:
     """
     Learnable token thinning (Proposal §3.3, §3.4).
-    - Training with gumbel_tau > 0: Gumbel-Softmax relaxation for differentiable Top-K.
-    - Inference or gumbel_tau=0: hard Top-K (gradients via straight-through).
+    Approximate differentiable Top-K: hard top-k selection + soft reweight with straight-through.
+    - Training with gumbel_tau > 0: Gumbel-Softmax weights on selected tokens (gradients flow).
+    - Inference or gumbel_tau=0: hard Top-K only.
     """
     if not (0.0 < keep_ratio <= 1.0):
         raise ValueError(f"keep_ratio must be in (0,1], got {keep_ratio}")
@@ -136,11 +142,11 @@ def thin_tokens_learnable(
     toks_kept = _gather_tokens(toks, idx)
 
     if gumbel_tau > 0 and score_head.training and toks.requires_grad:
-        # Gumbel-Softmax: soft weights for selected tokens, gradients flow to ScoreHead
+        # Approximate differentiable Top-K: soft reweight on hard-selected tokens
         soft_w = _gumbel_softmax_weights(scores, tau=gumbel_tau)
         soft_w_sel = torch.gather(soft_w, 1, idx)  # [B, k]
         soft_w_sel = soft_w_sel / (soft_w_sel.sum(dim=1, keepdim=True) + 1e-8)
-        # Straight-through: forward = toks_kept, backward = scaled (grad flows to scores)
+        # Straight-through: forward = toks_kept, backward = scaled (grad flows to ScoreHead)
         toks_kept = toks_kept * soft_w_sel.unsqueeze(-1) + (
             toks_kept * (1 - soft_w_sel.unsqueeze(-1))
         ).detach()

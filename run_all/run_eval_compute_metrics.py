@@ -231,6 +231,8 @@ def main():
             thin_method=thin_method,
             enable_early_exit=early_exit,
             use_anatomical_prior=use_anatomical_prior,
+            anatomical_prior_path=cfg.get("anatomical_prior_path") if cfg else None,
+            anatomical_prior_slice=cfg.get("anatomical_prior_slice") if cfg else None,
             pretrained=not args.no_pretrained,
         ).to(device)
         model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=True)

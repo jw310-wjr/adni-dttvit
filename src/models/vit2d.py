@@ -1,4 +1,5 @@
 import timm
+import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -11,10 +12,12 @@ from src.algos.token_thinning import (
 )
 
 
-def _build_anatomical_prior(num_patches: int, grid_size: int, sigma: float = 3.0) -> torch.Tensor:
+def _build_spatial_center_prior(num_patches: int, grid_size: int, sigma: float = 3.0) -> torch.Tensor:
     """
-    M_prior: coarse anatomical importance (Proposal §3.3).
-    For 2D axial MRI: center-medial region (e.g. hippocampal area) weighted higher.
+    Spatial center prior (weak proxy for anatomical prior).
+    Weights center-medial region higher; approximates that hippocampal/ventricular
+    regions often lie near the center in axial MRI. NOT an atlas-based anatomical
+    prior (e.g. hippocampus ROI mask). Use anatomical_prior_path for true anatomical prior.
     Returns [N] normalized importance in [0,1].
     """
     h = w = grid_size  # e.g. 14 for 224/16
@@ -24,6 +27,36 @@ def _build_anatomical_prior(num_patches: int, grid_size: int, sigma: float = 3.0
     dist_sq = (y - cy) ** 2 + (x - cx) ** 2
     prior = torch.exp(-dist_sq / (2 * sigma ** 2))
     prior = prior.flatten()  # [N]
+    prior = prior / (prior.max() + 1e-8)
+    return prior
+
+
+def _build_anatomical_prior_from_mask(
+    mask_path: str,
+    grid_size: int = 14,
+    slice_idx: Optional[int] = None,
+    axis: int = 2,
+) -> torch.Tensor:
+    """
+    Build M_prior from atlas mask NIfTI (e.g. hippocampus ROI).
+    Extracts 2D slice, downsamples to grid_size x grid_size, normalizes.
+    Returns [N] importance. Use for anatomically grounded prior.
+    """
+    try:
+        import nibabel as nib
+    except ImportError:
+        raise ImportError("nibabel required for anatomical mask prior")
+    img = nib.load(mask_path)
+    vol = img.get_fdata(dtype=np.float32)
+    if vol.ndim != 3:
+        raise ValueError(f"Mask must be 3D, got shape {vol.shape}")
+    vol = np.moveaxis(vol, axis, -1)  # (H,W,S)
+    z = slice_idx if slice_idx is not None else vol.shape[-1] // 2
+    slc = vol[..., z]  # (H,W)
+    # Downsample to grid_size
+    t = torch.from_numpy(slc).float().unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
+    t = F.interpolate(t, size=(grid_size, grid_size), mode="bilinear", align_corners=False)
+    prior = t.squeeze().flatten()
     prior = prior / (prior.max() + 1e-8)
     return prior
 
@@ -152,6 +185,8 @@ class TimmViTWithThinning(nn.Module):
         exit_blocks=(3, 7, 11),
         exit_dropout: float = 0.0,
         use_anatomical_prior: bool = False,
+        anatomical_prior_path: Optional[str] = None,
+        anatomical_prior_slice: Optional[int] = None,
         num_patches: int = 196,
         grid_size: int = 14,
         gumbel_tau: float = 0.0,
@@ -186,12 +221,18 @@ class TimmViTWithThinning(nn.Module):
             for blk_idx in self.schedule.keep_ratio_by_block:
                 self.score_heads[str(blk_idx)] = ScoreHead(embed_dim)
 
-        # Anatomical prior M_prior (Proposal §3.3)
+        # Anatomical prior M_prior (Proposal §3.3).
+        # - anatomical_prior_path: atlas mask NIfTI (e.g. hippocampus ROI) -> anatomically grounded.
+        # - else: spatial center prior (weak proxy, not atlas-based).
         if use_anatomical_prior:
-            self.register_buffer(
-                "m_prior",
-                _build_anatomical_prior(num_patches, grid_size).unsqueeze(0),
-            )
+            if anatomical_prior_path:
+                prior = _build_anatomical_prior_from_mask(
+                    anatomical_prior_path, grid_size,
+                    slice_idx=anatomical_prior_slice, axis=2,
+                )
+            else:
+                prior = _build_spatial_center_prior(num_patches, grid_size)
+            self.register_buffer("m_prior", prior.unsqueeze(0))
         else:
             self.register_buffer("m_prior", None)
 
@@ -335,6 +376,8 @@ def build_vit2d(
     exit_blocks=(3, 7, 11),
     exit_dropout: float = 0.0,
     use_anatomical_prior: bool = False,
+    anatomical_prior_path: Optional[str] = None,
+    anatomical_prior_slice: Optional[int] = None,
     gumbel_tau: float = 0.0,
     pretrained: bool = True,
 ):
@@ -362,6 +405,8 @@ def build_vit2d(
             exit_blocks=exit_blocks,
             exit_dropout=exit_dropout,
             use_anatomical_prior=use_anatomical_prior,
+            anatomical_prior_path=anatomical_prior_path,
+            anatomical_prior_slice=anatomical_prior_slice,
             num_patches=num_patches,
             grid_size=grid_size,
             gumbel_tau=gumbel_tau,
@@ -389,6 +434,8 @@ def build_vit2d(
         exit_blocks=exit_blocks,
         exit_dropout=exit_dropout,
         use_anatomical_prior=use_anatomical_prior,
+        anatomical_prior_path=anatomical_prior_path,
+        anatomical_prior_slice=anatomical_prior_slice,
         num_patches=num_patches,
         grid_size=grid_size,
         gumbel_tau=gumbel_tau,

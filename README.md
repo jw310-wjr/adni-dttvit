@@ -4,8 +4,8 @@ ADNI MRI classification with **Joint Spatial-Depth Adaptive ViT (JSD-ViT)**: Dyn
 
 **Proposal features:**
 - **Token thinning methods**: L2, Attn, Random (heuristic) + **Learnable** (ScoreHead MLP, §3.3)
-- **Anatomical regularization** (§3.3): L_anatomy = ||M_token - M_prior||²
-- **Uncertainty-guided early exit** (§3.6): exit when confidence ≥ τ AND entropy ≤ τ_u
+- **Approximate differentiable Top-K** (§3.4): hard top-k + soft reweight (Gumbel-Softmax straight-through)
+- **Anatomical regularization** (§3.3): L_anatomy = ||M_token - M_prior||². M_prior: spatial center (default) or atlas mask (e.g. hippocampus ROI)
 - **Budget-aware training** (§3.8): L_sparse = Σ(N_ℓ/N_0 - r_ℓ)²
 - **Feature distillation** (§3.7): L_feat = ||f_student - f_teacher||²
 
@@ -87,6 +87,11 @@ python run_all/run_teacher_student.py --epochs 30
 
 # 6. Evaluate compute metrics
 python run_all/run_eval_compute_metrics.py
+
+# 7. Interpretability: token heatmaps + anatomical alignment (§4.3)
+python run_all/run_interpretability.py --ckpt runs/compare_dtt_only/learnable/best.pt --n_samples 5 --overlay_mri
+# With anatomical ROI for alignment eval:
+python run_all/run_interpretability.py --ckpt ... --anatomical_mask atlases/hippocampus_roi.nii.gz --eval_alignment
 ```
 
 ## Experiments
@@ -102,7 +107,7 @@ python run_all/run_eval_compute_metrics.py
 | `run_slice_selection.py` | Find best fixed z slice |
 | `run_eval_early_exit_tau.py` | Evaluate early-exit at different tau |
 | `run_eval_compute_metrics.py` | Accuracy, AUROC, time, speedup, Pareto plot (§4.2, §4.3) |
-| `run_interpretability.py` | Token importance visualization (§4.3) |
+| `run_interpretability.py` | Token heatmaps, overlay on MRI, anatomical alignment eval (§4.3) |
 
 ## Outputs
 
@@ -138,14 +143,19 @@ python run_all/train.py --out_dir runs/binary
 ## Proposal (JSD-ViT) Options
 
 ```bash
-# Learnable DTT + anatomical prior + uncertainty-guided EE
+# Learnable DTT + anatomical prior (spatial center) + uncertainty-guided EE
 python run_all/train.py --thinning --thin_method learnable --early_exit \
   --use_anatomical_prior --lambda_anatomy 0.1 --lambda_sparse 0.01 \
   --tau 0.8 --tau_u 0.5
 
+# Anatomically grounded prior (atlas mask, e.g. hippocampus ROI)
+python run_all/train.py --thinning --thin_method learnable --use_anatomical_prior \
+  --anatomical_prior_path atlases/hippocampus_roi.nii.gz --lambda_anatomy 0.1
+
 # Teacher-Student with feature distillation
 python run_all/run_teacher_student.py --thin_method learnable --lambda_feat 0.1
 
-# Interpretability: token importance maps (§4.3)
-python run_all/run_interpretability.py --ckpt runs/compare_dtt_only/learnable/best.pt --n_samples 5
+# Interpretability: token heatmaps, overlay on MRI, anatomical alignment (§4.3)
+python run_all/run_interpretability.py --ckpt runs/compare_dtt_only/learnable/best.pt --n_samples 5 --overlay_mri
+python run_all/run_interpretability.py --ckpt ... --anatomical_mask atlases/hippocampus_roi.nii.gz --eval_alignment
 ```

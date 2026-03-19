@@ -42,10 +42,10 @@ def normalize_2d(
 
 
 def to_3ch_resize(img: np.ndarray, out_size: int = 224) -> torch.Tensor:
+    """Resize to out_size; returns (1,H,W) for ViT in_chans=1 (grayscale MRI)."""
     t = torch.from_numpy(img).float().unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
     t = F.interpolate(t, size=(out_size, out_size), mode="bilinear", align_corners=False)
-    t = t.squeeze(0).repeat(3, 1, 1)  # (3,H,W)
-    return t
+    return t.squeeze(0)  # (1,H,W) - single channel for in_chans=1
 
 
 # -------------------------
