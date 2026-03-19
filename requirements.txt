@@ -1,0 +1,19 @@
+# Training
+torch>=2.0
+timm>=0.9
+numpy
+pandas
+scikit-learn
+
+# Data
+nibabel
+
+# Plotting
+matplotlib
+
+# FLOPs counting
+ptflops>=0.7
+
+# Preprocessing (optional, for 01_MNI_preprocess.py)
+# ants  # pip install ants or conda install -c ants
+# pip install synthstrip  # if using SynthStrip

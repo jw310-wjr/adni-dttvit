@@ -1,0 +1,35 @@
+# ===== data (never commit) =====
+data/
+data_nifti/
+*.nii
+*.nii.gz
+
+# ===== outputs =====
+runs/
+logs/
+*.pt
+*.pth
+*.ckpt
+
+# ===== caches =====
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# ===== env =====
+.venv/
+.env
+conda_envs/
+
+# ===== OS =====
+.DS_Store
+.idea/
+
+# keep code modules under src/
+!src/data/
+!src/data/**
+__pycache__/
+
+.Rhistory
+.DS_Store
+**/.DS_Store
