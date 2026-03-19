@@ -49,6 +49,18 @@ def parse_args():
         help="CE weight; (1-alpha) for KD. loss = alpha*CE + (1-alpha)*KD",
     )
     p.add_argument(
+        "--thin_method",
+        default="learnable",
+        choices=["l2", "attn", "random", "learnable"],
+        help="Student thinning method (Proposal: learnable)",
+    )
+    p.add_argument(
+        "--lambda_feat",
+        type=float,
+        default=0.1,
+        help="Proposal §3.7: feature distillation weight",
+    )
+    p.add_argument(
         "--skip_teacher",
         action="store_true",
         help="Skip stage 1, use existing teacher (teacher_out/best.pt)",
@@ -96,7 +108,7 @@ def main():
         if not os.path.exists(teacher_ckpt):
             raise FileNotFoundError(f"Teacher checkpoint not found: {teacher_ckpt}")
 
-    # Stage 2: Train student (DTT + Early Exit) with distillation
+    # Stage 2: Train student (DTT + Early Exit) with distillation (Proposal JSD-ViT)
     cmd = [
         sys.executable,
         train_script,
@@ -105,11 +117,12 @@ def main():
         "--slice_selector", "fixed",
         "--z_index", "77",
         "--thinning",
-        "--thin_method", "attn",
+        "--thin_method", args.thin_method,
         "--early_exit",
         "--teacher_ckpt", teacher_ckpt,
         "--distill_temp", str(args.distill_temp),
         "--distill_alpha", str(args.distill_alpha),
+        "--lambda_feat", str(args.lambda_feat),
         "--out_dir", args.student_out,
         "--epochs", str(args.epochs),
         "--batch_size", str(args.batch_size),

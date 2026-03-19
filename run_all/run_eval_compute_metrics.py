@@ -44,10 +44,11 @@ def parse_args():
     p.add_argument("--manifest_dir", default="manifests")
     p.add_argument("--manifest", default="test.csv")
     p.add_argument("--data_root", default=".")
-    p.add_argument("--label_map", default="CN=0,MCI=1,AD=2")
+    p.add_argument("--label_map", default="CN=0,AD=1", help="Binary: CN=0,AD=1")
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--num_workers", type=int, default=2)
-    p.add_argument("--tau", type=float, default=0.8, help="Early-exit threshold")
+    p.add_argument("--tau", type=float, default=0.8, help="Early-exit confidence threshold")
+    p.add_argument("--tau_u", type=float, default=None, help="Proposal §3.6: entropy threshold for uncertainty-guided exit")
     p.add_argument("--warmup", type=int, default=5, help="Warmup batches before timing")
     p.add_argument("--out_csv", default="results/compute_metrics.csv")
     return p.parse_args()
@@ -93,7 +94,7 @@ def count_flops(model, device, input_shape=(1, 224, 224)):
 
 
 @torch.no_grad()
-def evaluate_with_timing(model, loader, device, tau=None, warmup=5):
+def evaluate_with_timing(model, loader, device, tau=None, tau_u=None, warmup=5):
     model.eval()
     correct = 0
     total = 0
@@ -110,7 +111,7 @@ def evaluate_with_timing(model, loader, device, tau=None, warmup=5):
             torch.cuda.synchronize()
         t0 = time.perf_counter()
         if tau:
-            out = model(x, tau=tau)
+            out = model(x, tau=tau, tau_u=tau_u)
             if isinstance(out, tuple) and len(out) == 2:
                 logits, exit_layer = out
                 for k in (1, 2, 3):
@@ -154,9 +155,11 @@ def default_run_dirs(project_root):
         ("DTT_L2_only", os.path.join(base, "runs/compare_dtt_only/l2")),
         ("DTT_Attn_only", os.path.join(base, "runs/compare_dtt_only/attn")),
         ("DTT_Random_only", os.path.join(base, "runs/compare_dtt_only/random")),
+        ("DTT_Learnable_only", os.path.join(base, "runs/compare_dtt_only/learnable")),
         ("DTT_L2+EE", os.path.join(base, "runs/compare_thin_methods/l2")),
         ("DTT_Attn+EE", os.path.join(base, "runs/compare_thin_methods/attn")),
         ("DTT_Random+EE", os.path.join(base, "runs/compare_thin_methods/random")),
+        ("DTT_Learnable+EE", os.path.join(base, "runs/compare_thin_methods/learnable")),
         ("Student", os.path.join(base, "runs/student_distill")),
     ]
 
@@ -195,18 +198,20 @@ def main():
         thinning = cfg.get("thinning", False) if cfg else False
         thin_method = cfg.get("thin_method", "attn") if cfg else "attn"
         early_exit = cfg.get("early_exit", False) if cfg else False
+        use_anatomical_prior = cfg.get("use_anatomical_prior", False) if cfg else False
 
         model = build_vit2d(
             num_classes=num_classes,
             thinning=thinning,
             thin_method=thin_method,
             enable_early_exit=early_exit,
+            use_anatomical_prior=use_anatomical_prior,
         ).to(device)
         model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=True)
 
         tau = args.tau if early_exit else None
         acc, ms, avg_exit, _, peak_mb = evaluate_with_timing(
-            model, loader, device, tau=tau, warmup=args.warmup
+            model, loader, device, tau=tau, tau_u=args.tau_u, warmup=args.warmup
         )
 
         num_params = count_params(model)

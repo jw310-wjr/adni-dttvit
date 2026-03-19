@@ -28,7 +28,7 @@ def parse_args():
     p.add_argument("--ckpt", required=True, help="Path to checkpoint (DTT+EE model)")
     p.add_argument("--manifest_dir", default="manifests")
     p.add_argument("--data_root", default=".")
-    p.add_argument("--label_map", default="CN=0,MCI=1,AD=2")
+    p.add_argument("--label_map", default="CN=0,AD=1", help="Binary: CN=0,AD=1")
     p.add_argument("--tau_list", type=float, nargs="+", default=[0.5, 0.6, 0.7, 0.8, 0.9])
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--num_workers", type=int, default=2)

@@ -6,7 +6,8 @@ from sklearn.model_selection import train_test_split
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in_csv", type=str, default="manifests/all.csv")
+    ap.add_argument("--in_csv", type=str, default="data/merged431_syn.csv",
+                    help="Input manifest (use data/merged431.csv for raw, data/merged431_syn.csv for preprocessed)")
     ap.add_argument("--out_dir", type=str, default="manifests")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()

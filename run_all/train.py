@@ -38,8 +38,8 @@ def parse_args():
     # labels
     p.add_argument(
         "--label_map",
-        default="CN=0,MCI=1,AD=2",
-        help='Format: "CN=0,MCI=1,AD=2". Use "CN=0,AD=1" for binary (CN vs AD)'
+        default="CN=0,AD=1",
+        help='Binary: "CN=0,AD=1". Ternary: "CN=0,MCI=1,AD=2"'
     )
 
     # ---- Input type ----
@@ -103,8 +103,8 @@ def parse_args():
     p.add_argument(
         "--thin_method",
         default="l2",
-        choices=["l2", "random", "attn"],
-        help="Token thinning method"
+        choices=["l2", "random", "attn", "learnable"],
+        help="Token thinning method (learnable = Proposal §3.3 ScoreHead)"
     )
     p.add_argument(
         "--debug_thin",
@@ -137,6 +137,12 @@ def parse_args():
         type=float,
         default=None,
         help="If set (e.g., 0.8), evaluate with confidence-based early exit at threshold tau."
+    )
+    p.add_argument(
+        "--tau_u",
+        type=float,
+        default=None,
+        help="Proposal §3.6: entropy threshold for uncertainty-guided early exit."
     )
     p.add_argument(
         "--exit_blocks",
@@ -174,6 +180,31 @@ def parse_args():
         action="store_true",
         help="Teacher uses early exit (must match teacher checkpoint)"
     )
+    p.add_argument(
+        "--lambda_feat",
+        type=float,
+        default=0.0,
+        help="Proposal §3.7: weight for feature distillation L_feat = ||f_student - f_teacher||²"
+    )
+
+    # ---- Proposal: anatomical regularization & budget-aware ----
+    p.add_argument(
+        "--use_anatomical_prior",
+        action="store_true",
+        help="Proposal §3.3: L_anatomy = ||M_token - M_prior||²"
+    )
+    p.add_argument(
+        "--lambda_anatomy",
+        type=float,
+        default=0.0,
+        help="Weight for anatomical regularization"
+    )
+    p.add_argument(
+        "--lambda_sparse",
+        type=float,
+        default=0.0,
+        help="Proposal §3.8: weight for budget-aware L_sparse = Σ(N_ℓ/N_0 - r_ℓ)²"
+    )
 
     return p.parse_args()
 
@@ -196,27 +227,25 @@ def get_device():
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, tau=None):
+def evaluate(model, loader, device, tau=None, tau_u=None):
     """
-    If tau is None: standard eval using final head logits.
-    If tau is set: use confidence-based early exit (model(x, tau=...)) and report exit stats.
+    If tau is set: uncertainty-guided early exit (Proposal §3.6) with tau, tau_u.
     """
     model.eval()
     correct = 0
     total = 0
-
     exit_counts = {1: 0, 2: 0, 3: 0} if tau is not None else None
 
     for x, y in loader:
         x, y = x.to(device), y.to(device)
 
         if tau is None:
-            logits = model(x)
+            logits = (model.forward_all(x)[2] if hasattr(model, "forward_all") else model(x))
             pred = logits.argmax(dim=1)
         else:
-            out = model(x, tau=tau)
-            if isinstance(out, tuple) and len(out) == 2:
-                logits, exit_layer = out
+            out = model(x, tau=tau, tau_u=tau_u)
+            if isinstance(out, tuple) and len(out) >= 2:
+                logits, exit_layer = out[0], out[1]
                 for k in (1, 2, 3):
                     exit_counts[k] += (exit_layer == k).sum().item()
             else:
@@ -227,12 +256,29 @@ def evaluate(model, loader, device, tau=None):
         total += y.numel()
 
     acc = correct / max(total, 1)
-
     if tau is not None:
         avg_exit = (1 * exit_counts[1] + 2 * exit_counts[2] + 3 * exit_counts[3]) / max(total, 1)
         return acc, exit_counts, avg_exit
-
     return acc
+
+
+def _compute_aux_losses(model, aux, lambda_anatomy, lambda_sparse, schedule):
+    """Proposal §3.3 L_anatomy, §3.8 L_sparse."""
+    loss_aux = 0.0
+    if lambda_anatomy > 0 and hasattr(model, "m_prior") and model.m_prior is not None:
+        m_prior = model.m_prior.squeeze(0)  # [N]
+        m_prior = m_prior / (m_prior.sum() + 1e-8)
+        for m_token in aux.get("m_token_list", []):
+            # m_token: [B, N], normalize to distribution
+            m_token_norm = F.softmax(m_token, dim=1)
+            loss_aux = loss_aux + ((m_token_norm - m_prior) ** 2).mean() * lambda_anatomy
+    if lambda_sparse > 0:
+        N0 = aux.get("N0", 196)
+        for blk_idx, N_l in aux.get("token_counts", []):
+            r_l = schedule.ratio_after_block(blk_idx)
+            if r_l is not None:
+                loss_aux = loss_aux + ((N_l / N0) - r_l) ** 2 * lambda_sparse
+    return loss_aux
 
 
 def train_one_epoch(
@@ -245,45 +291,40 @@ def train_one_epoch(
     early_exit=False,
     alpha=0.3,
     beta=0.3,
+    lambda_anatomy=0.0,
+    lambda_sparse=0.0,
 ):
     """
-    If early_exit: train multi-head CE
-      loss = CE(logits3) + alpha*CE(logits1) + beta*CE(logits2)
-    Else: standard single-head CE on final logits.
+    If early_exit: multi-head CE + optional L_anatomy, L_sparse (Proposal).
     """
     model.train()
     total_loss = 0.0
+    schedule = getattr(model, "schedule", None) or type("S", (), {"ratio_after_block": lambda i: None})()
 
     for x, y in loader:
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
 
+        def _step():
+            if hasattr(model, "forward_all"):
+                logits1, logits2, logits3, aux = model.forward_all(x)
+                loss = criterion(logits3, y)
+                if early_exit:
+                    loss = loss + alpha * criterion(logits1, y) + beta * criterion(logits2, y)
+                loss = loss + _compute_aux_losses(model, aux, lambda_anatomy, lambda_sparse, schedule)
+            else:
+                logits = model(x)
+                loss = criterion(logits, y)
+            return loss
+
         if scaler is not None:
             with torch.autocast(device_type="cuda", dtype=torch.float16):
-                if early_exit:
-                    logits1, logits2, logits3 = model.forward_all(x)
-                    loss3 = criterion(logits3, y)
-                    loss1 = criterion(logits1, y)
-                    loss2 = criterion(logits2, y)
-                    loss = loss3 + alpha * loss1 + beta * loss2
-                else:
-                    logits = model(x)
-                    loss = criterion(logits, y)
-
+                loss = _step()
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            if early_exit:
-                logits1, logits2, logits3 = model.forward_all(x)
-                loss3 = criterion(logits3, y)
-                loss1 = criterion(logits1, y)
-                loss2 = criterion(logits2, y)
-                loss = loss3 + alpha * loss1 + beta * loss2
-            else:
-                logits = model(x)
-                loss = criterion(logits, y)
-
+            loss = _step()
             loss.backward()
             optimizer.step()
 
@@ -305,37 +346,58 @@ def train_one_epoch_distill(
     early_exit=False,
     alpha_ee=0.3,
     beta_ee=0.3,
+    lambda_feat: float = 0.0,
+    lambda_anatomy: float = 0.0,
+    lambda_sparse: float = 0.0,
 ):
     """
-    Knowledge distillation: loss = alpha*CE(student, y) + (1-alpha)*KL(student_soft || teacher_soft)
-    Teacher uses final logits only (no early-exit at train time for KD).
+    Proposal §3.7: L = L_cls + λ1*L_KD + λ2*L_feat + λ3*L_sparse + λ4*L_anatomy
+    L_feat = ||f_student - f_teacher||²
     """
     student.train()
     teacher.eval()
     total_loss = 0.0
     kl_fn = nn.KLDivLoss(reduction="batchmean")
+    schedule = getattr(student, "schedule", None) or type("S", (), {"ratio_after_block": lambda i: None})()
 
     for x, y in loader:
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
 
         with torch.no_grad():
-            teacher_logits = teacher(x)
+            if hasattr(teacher, "forward_all"):
+                t_logits1, t_logits2, t_logits3, t_aux = teacher.forward_all(x)
+                teacher_logits = t_logits3
+                teacher_feat = t_aux.get("cls_feature")
+            else:
+                teacher_logits = teacher(x)
+                teacher_feat = None
 
-        if early_exit:
-            logits1, logits2, logits3 = student.forward_all(x)
+        if hasattr(student, "forward_all"):
+            logits1, logits2, logits3, aux = student.forward_all(x)
             student_logits = logits3
-            loss_ce = criterion(logits3, y) + alpha_ee * criterion(logits1, y) + beta_ee * criterion(logits2, y)
+            student_feat = aux.get("cls_feature")
         else:
             student_logits = student(x)
-            loss_ce = criterion(student_logits, y)
+            aux = {}
+            student_feat = None
+            logits1 = logits2 = None
 
-        # KD loss: KL(student_soft || teacher_soft) with temperature
+        loss_ce = criterion(student_logits, y)
+        if early_exit and logits1 is not None and logits2 is not None:
+            loss_ce = loss_ce + alpha_ee * criterion(logits1, y) + beta_ee * criterion(logits2, y)
+
         soft_student = F.log_softmax(student_logits / temp, dim=1)
         soft_teacher = F.softmax(teacher_logits / temp, dim=1)
         loss_kd = kl_fn(soft_student, soft_teacher) * (temp * temp)
 
         loss = alpha * loss_ce + (1 - alpha) * loss_kd
+
+        if lambda_feat > 0 and student_feat is not None and teacher_feat is not None:
+            loss = loss + lambda_feat * F.mse_loss(student_feat, teacher_feat)
+
+        if lambda_anatomy > 0 or lambda_sparse > 0:
+            loss = loss + _compute_aux_losses(student, aux, lambda_anatomy, lambda_sparse, schedule)
 
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -434,6 +496,7 @@ def main():
         debug_thin=args.debug_thin,
         enable_early_exit=args.early_exit,
         exit_blocks=tuple(args.exit_blocks),
+        use_anatomical_prior=args.use_anatomical_prior,
     ).to(device)
 
     teacher = None
@@ -517,6 +580,9 @@ def main():
                 early_exit=args.early_exit,
                 alpha_ee=args.alpha,
                 beta_ee=args.beta,
+                lambda_feat=args.lambda_feat,
+                lambda_anatomy=args.lambda_anatomy,
+                lambda_sparse=args.lambda_sparse,
             )
         else:
             train_loss = train_one_epoch(
@@ -529,12 +595,16 @@ def main():
                 early_exit=args.early_exit,
                 alpha=args.alpha,
                 beta=args.beta,
+                lambda_anatomy=args.lambda_anatomy,
+                lambda_sparse=args.lambda_sparse,
             )
 
         if args.tau is None:
             val_acc = evaluate(model, val_loader, device)
         else:
-            val_acc, exit_counts, avg_exit = evaluate(model, val_loader, device, tau=args.tau)
+            val_acc, exit_counts, avg_exit = evaluate(
+                model, val_loader, device, tau=args.tau, tau_u=args.tau_u
+            )
             print(f"[val early-exit] tau={args.tau} exit_counts={exit_counts} avg_exit={avg_exit:.3f}")
 
         dt = time.time() - t0
@@ -551,7 +621,9 @@ def main():
         test_acc = evaluate(model, test_loader, device)
         print(f"Done. best_val_acc={best_val:.4f} test_acc={test_acc:.4f}")
     else:
-        test_acc, exit_counts, avg_exit = evaluate(model, test_loader, device, tau=args.tau)
+        test_acc, exit_counts, avg_exit = evaluate(
+            model, test_loader, device, tau=args.tau, tau_u=args.tau_u
+        )
         print(f"Done. best_val_acc={best_val:.4f} test_acc={test_acc:.4f} (early-exit tau={args.tau})")
         print(f"Exit counts: {exit_counts} | Avg exit: {avg_exit:.3f}")
 
@@ -569,10 +641,13 @@ def main():
         "thin_method": args.thin_method,
         "early_exit": args.early_exit,
         "tau": args.tau,
+        "tau_u": args.tau_u,
+        "use_anatomical_prior": args.use_anatomical_prior,
         "distill": args.teacher_ckpt is not None,
         "teacher_ckpt": args.teacher_ckpt,
         "distill_temp": args.distill_temp,
         "distill_alpha": args.distill_alpha,
+        "lambda_feat": args.lambda_feat,
     }
     results_path = os.path.join(args.out_dir, "results.json")
     with open(results_path, "w") as f:

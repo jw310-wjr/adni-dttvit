@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Batch run DTT+Early Exit for each thin_method (l2, attn, random) and aggregate results.
+Batch run DTT+Early Exit for each thin_method (l2, attn, random, learnable) and aggregate results.
 Generates figures and text summaries suitable for papers.
 Usage:
   python run_all/run_compare_thin_methods.py
@@ -27,13 +27,14 @@ def parse_args():
     p.add_argument("--results_dir", default="results")
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch_size", type=int, default=8)
-    p.add_argument("--methods", nargs="+", default=["baseline", "l2", "attn", "random"])
+    p.add_argument("--methods", nargs="+", default=["baseline", "l2", "attn", "random", "learnable"],
+                   help="DTT+EE methods: l2/attn/random (heuristic), learnable (ScoreHead)")
     p.add_argument("--train_extra", default="", help="Extra args for train.py (e.g. --amp)")
     p.add_argument("--skip_train", action="store_true", help="Skip training, only plot from existing results")
     return p.parse_args()
 
 
-METHOD_LABELS = {"baseline": "Baseline", "l2": "DTT+L2", "attn": "DTT+CLS-attn", "random": "DTT+Random"}
+METHOD_LABELS = {"baseline": "Baseline", "l2": "DTT+L2", "attn": "DTT+CLS-attn", "random": "DTT+Random", "learnable": "DTT+Learnable"}
 
 
 def run_training(args, train_script):

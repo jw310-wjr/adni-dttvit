@@ -26,7 +26,7 @@ def parse_args():
     p.add_argument("--manifest_dir", default="manifests")
     p.add_argument("--manifest", default="test.csv", help="Manifest file (e.g. test.csv)")
     p.add_argument("--data_root", default=".")
-    p.add_argument("--label_map", default="CN=0,MCI=1,AD=2")
+    p.add_argument("--label_map", default="CN=0,AD=1", help="Binary: CN=0,AD=1")
     p.add_argument("--slice_selector", default="fixed")
     p.add_argument("--z_index", type=int, default=77)
     p.add_argument("--thinning", action="store_true")

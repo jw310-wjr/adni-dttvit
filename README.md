@@ -1,6 +1,13 @@
-# ADNI-DTT-ViT
+# ADNI-DTT-ViT (JSD-ViT)
 
-ADNI MRI classification with Vision Transformers, Dynamic Token Thinning (DTT), Early Exit, and Teacher-Student distillation.
+ADNI MRI classification with **Joint Spatial-Depth Adaptive ViT (JSD-ViT)**: Dynamic Token Thinning (DTT), Uncertainty-Guided Early Exit, and Teacher-Student distillation.
+
+**Proposal features:**
+- **Token thinning methods**: L2, Attn, Random (heuristic) + **Learnable** (ScoreHead MLP, §3.3)
+- **Anatomical regularization** (§3.3): L_anatomy = ||M_token - M_prior||²
+- **Uncertainty-guided early exit** (§3.6): exit when confidence ≥ τ AND entropy ≤ τ_u
+- **Budget-aware training** (§3.8): L_sparse = Σ(N_ℓ/N_0 - r_ℓ)²
+- **Feature distillation** (§3.7): L_feat = ||f_student - f_teacher||²
 
 ## Setup
 
@@ -26,37 +33,37 @@ data/
 └── DCM/            # Original DICOM
 ```
 
-**Full pipeline (run from project root):**
+**Full pipeline (run from project root, uses preprocessed/MNI-registered data for training):**
 
 ```bash
 # 0. Setup
 mkdir -p runs/logs results
 
-# 1. 02: Merge metadata with NIfTI paths
-# Input: data/adni431.csv, data/adni_nifti/
-# Output: data/merged431.csv
+# 1. 02: Merge metadata with NIfTI paths (raw, for preprocessing)
 python scripts/02_build_manifest.py
+# Output: data/merged431.csv
 
-# 2. 03: Split into train/val/test
-# Input: data/merged431.csv
-# Output: manifests/train.csv, val.csv, test.csv
-python scripts/03_make_splits.py --in_csv data/merged431.csv --out_dir manifests
-
-# 3. 01: MNI preprocessing (N4 → SynthStrip → Affine → SyN → Jacobian)
+# 2. 01: MNI preprocessing (N4 → SynthStrip → Affine → SyN)
 # Input: data/merged431.csv
 # Output: data/n4/, stripped/, affine/, syn/, jacobian/
 sbatch slurm/active/mni_preprocess.sbatch
-# Or: python scripts/01_MNI_preprocess.py
 
-# 4. Training (uses nifti_path from manifests, default: data/adni_nifti)
+# 3. 02 --preprocessed: Build manifest pointing to syn/ (MNI-registered)
+python scripts/02_build_manifest.py --preprocessed
+# Output: data/merged431_syn.csv
+
+# 4. 03: Split into train/val/test (default in_csv: data/merged431_syn.csv)
+python scripts/03_make_splits.py --out_dir manifests
+# Output: manifests/train.csv, val.csv, test.csv (nifti_path -> data/syn/)
+
+# 5. Training (uses preprocessed NIfTI from syn/)
 sbatch slurm/active/baseline.sbatch
-# ... see Quick Start
 ```
 
-- **Manifest columns**: `Subject`, `Group` (CN/MCI/AD), `nifti_path`
+- **Manifest columns**: `Subject`, `Group` (CN/AD for binary), `nifti_path`
 - **Preprocessing**: SynthStrip → ANTs (Affine + SyN) → MNI space
 
-See `scripts/01_MNI_preprocess.py` and `src/data/readmd.md` for details.
+See `docs/DATA_FLOW.md` for full pipeline details, and `scripts/01_MNI_preprocess.py`, `src/data/readmd.md`.
 
 ## Quick Start
 
@@ -84,13 +91,13 @@ python run_all/run_eval_compute_metrics.py
 
 ## Experiments
 
-**Pipeline**: Baseline → Only EE → DTT only (3 methods) → pick best → DTT+EE → Teacher-Student
+**Pipeline**: Baseline → Only EE → DTT only (4 methods) → pick best → DTT+EE → Teacher-Student
 
 | Script | Description |
 |--------|-------------|
 | `run_compare_ablation.py` | Baseline, Only EE, +DTT, +DTT+EE |
-| `run_compare_dtt_only.py` | Stage 1: DTT(L2/Attn/Random) only, pick best method |
-| `run_compare_thin_methods.py` | Stage 2: DTT(L2/Attn/Random)+EE |
+| `run_compare_dtt_only.py` | Stage 1: DTT(L2/Attn/Random/Learnable) only, pick best method |
+| `run_compare_thin_methods.py` | Stage 2: DTT(L2/Attn/Random/Learnable)+EE |
 | `run_teacher_student.py` | Stage 3: Teacher → Student (DTT+EE) |
 | `run_slice_selection.py` | Find best fixed z slice |
 | `run_eval_early_exit_tau.py` | Evaluate early-exit at different tau |
@@ -119,8 +126,27 @@ python run_all/inference.py --ckpt runs/vit2d_baseline/best.pt \
   --manifest_dir manifests --data_root . --output predictions.csv
 ```
 
-## Binary Classification (CN vs AD)
+## Classification
+
+**Default: binary (CN vs AD)** — `--label_map "CN=0,AD=1"`
 
 ```bash
-python run_all/train.py --label_map "CN=0,AD=1" --out_dir runs/binary
+python run_all/train.py --out_dir runs/binary
+```
+
+Ternary (CN/MCI/AD):
+```bash
+python run_all/train.py --label_map "CN=0,MCI=1,AD=2" --out_dir runs/ternary
+```
+
+## Proposal (JSD-ViT) Options
+
+```bash
+# Learnable DTT + anatomical prior + uncertainty-guided EE
+python run_all/train.py --thinning --thin_method learnable --early_exit \
+  --use_anatomical_prior --lambda_anatomy 0.1 --lambda_sparse 0.01 \
+  --tau 0.8 --tau_u 0.5
+
+# Teacher-Student with feature distillation
+python run_all/run_teacher_student.py --thin_method learnable --lambda_feat 0.1
 ```

@@ -1,10 +1,17 @@
 # src/algos/token_thinning.py
+"""
+Token thinning methods for JSD-ViT (Joint Spatial-Depth Adaptive ViT).
+
+Proposal: Learnable ScoreHead + Gumbel-Softmax Top-K (train) / hard Top-K (inference).
+Heuristic baselines: L2, Attn, Random for ablation.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Optional
 
 import torch
+import torch.nn as nn
 
 
 @dataclass(frozen=True)
@@ -20,6 +27,31 @@ class ThinningSchedule:
 
     def ratio_after_block(self, block_idx: int) -> Optional[float]:
         return self.keep_ratio_by_block.get(block_idx, None)
+
+
+# -------------------------
+# Learnable ScoreHead (Proposal §3.3)
+# -------------------------
+class ScoreHead(nn.Module):
+    """
+    Lightweight MLP for learnable token scoring: s_ℓ = ScoreHead_ℓ(z_{ℓ-1}).
+    Outputs importance scores for patch tokens (excluding CLS).
+    """
+    def __init__(self, in_dim: int, hidden_dim: Optional[int] = None):
+        super().__init__()
+        hidden_dim = hidden_dim or max(64, in_dim // 4)
+        self.mlp = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        """
+        tokens: [B, N, C] (patch tokens only, no CLS)
+        returns: [B, N] scores
+        """
+        return self.mlp(tokens).squeeze(-1)
 
 
 def _validate_x(x: torch.Tensor) -> None:
@@ -65,7 +97,37 @@ def _compute_k(N: int, keep_ratio: float) -> int:
 
 
 # -------------------------
-# v1: L2-norm thinning
+# Learnable thinning (Proposal §3.3, §3.4)
+# -------------------------
+def thin_tokens_learnable(
+    x: torch.Tensor,
+    score_head: nn.Module,
+    keep_ratio: float,
+    keep_cls: bool = True,
+) -> torch.Tensor:
+    """
+    Learnable token thinning. ScoreHead produces importance scores; hard Top-K.
+    Gradients flow to ScoreHead via downstream loss.
+    """
+    if not (0.0 < keep_ratio <= 1.0):
+        raise ValueError(f"keep_ratio must be in (0,1], got {keep_ratio}")
+    if keep_ratio >= 1.0:
+        return x
+
+    cls, toks = _split_cls_patches(x, keep_cls=keep_cls)
+    B, N, C = toks.shape
+    k = _compute_k(N, keep_ratio)
+    if k >= N:
+        return x
+
+    scores = score_head(toks)  # [B, N]
+    idx = _topk_indices(scores, k)
+    toks_kept = _gather_tokens(toks, idx)
+    return torch.cat([cls, toks_kept], dim=1) if keep_cls else toks_kept
+
+
+# -------------------------
+# v1: L2-norm thinning (heuristic)
 # -------------------------
 def thin_tokens_l2(
     x: torch.Tensor,
@@ -216,15 +278,16 @@ def maybe_thin_after_block(
     schedule: ThinningSchedule,
     method: str = "l2",
     attn: Optional[torch.Tensor] = None,
+    score_head: Optional[nn.Module] = None,
 ) -> torch.Tensor:
     """
     Helper: after running block_idx, apply thinning if schedule says so.
 
     method:
-      - "l2": keep tokens with largest L2 norm (v1 baseline)
+      - "l2": keep tokens with largest L2 norm (heuristic baseline)
       - "random": random ablation
-      - "attn": keep tokens with highest CLS->token attention (method Eq.(1))
-               requires attn to be provided for that block.
+      - "attn": keep tokens with highest CLS->token attention (heuristic)
+      - "learnable": ScoreHead-based (Proposal §3.3); requires score_head
     """
     r = schedule.ratio_after_block(block_idx)
     if r is None or r >= 1.0:
@@ -236,7 +299,11 @@ def maybe_thin_after_block(
         return thin_tokens_random(x, keep_ratio=r, keep_cls=True)
     if method == "attn":
         if attn is None:
-            raise ValueError("method='attn' requires attn tensor (attention weights) for this block")
+            raise ValueError("method='attn' requires attn tensor for this block")
         return thin_tokens_attn_cls(x, attn=attn, keep_ratio=r, keep_cls=True)
+    if method == "learnable":
+        if score_head is None:
+            raise ValueError("method='learnable' requires score_head for this block")
+        return thin_tokens_learnable(x, score_head=score_head, keep_ratio=r, keep_cls=True)
 
     raise ValueError(f"Unknown thinning method: {method}")
