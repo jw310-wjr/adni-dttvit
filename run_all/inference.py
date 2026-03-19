@@ -36,6 +36,7 @@ def parse_args():
     p.add_argument("--output", default="predictions.csv")
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--num_workers", type=int, default=2)
+    p.add_argument("--no_pretrained", action="store_true", help="Skip ImageNet weights (use when loading from checkpoint)")
     return p.parse_args()
 
 
@@ -61,6 +62,7 @@ def main():
         thinning=args.thinning,
         thin_method=args.thin_method,
         enable_early_exit=args.early_exit,
+        pretrained=not args.no_pretrained,
     ).to(device)
     model.load_state_dict(torch.load(args.ckpt, map_location=device), strict=True)
     model.eval()

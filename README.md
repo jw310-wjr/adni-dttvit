@@ -101,7 +101,8 @@ python run_all/run_eval_compute_metrics.py
 | `run_teacher_student.py` | Stage 3: Teacher → Student (DTT+EE) |
 | `run_slice_selection.py` | Find best fixed z slice |
 | `run_eval_early_exit_tau.py` | Evaluate early-exit at different tau |
-| `run_eval_compute_metrics.py` | Accuracy + time + speedup (all configs) |
+| `run_eval_compute_metrics.py` | Accuracy, AUROC, time, speedup, Pareto plot (§4.2, §4.3) |
+| `run_interpretability.py` | Token importance visualization (§4.3) |
 
 ## Outputs
 
@@ -128,15 +129,10 @@ python run_all/inference.py --ckpt runs/vit2d_baseline/best.pt \
 
 ## Classification
 
-**Default: binary (CN vs AD)** — `--label_map "CN=0,AD=1"`
+**Binary (CN vs AD)** — default `--label_map "CN=0,AD=1"`
 
 ```bash
 python run_all/train.py --out_dir runs/binary
-```
-
-Ternary (CN/MCI/AD):
-```bash
-python run_all/train.py --label_map "CN=0,MCI=1,AD=2" --out_dir runs/ternary
 ```
 
 ## Proposal (JSD-ViT) Options
@@ -149,4 +145,7 @@ python run_all/train.py --thinning --thin_method learnable --early_exit \
 
 # Teacher-Student with feature distillation
 python run_all/run_teacher_student.py --thin_method learnable --lambda_feat 0.1
+
+# Interpretability: token importance maps (§4.3)
+python run_all/run_interpretability.py --ckpt runs/compare_dtt_only/learnable/best.pt --n_samples 5
 ```

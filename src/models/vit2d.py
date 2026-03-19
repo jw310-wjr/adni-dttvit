@@ -154,6 +154,7 @@ class TimmViTWithThinning(nn.Module):
         use_anatomical_prior: bool = False,
         num_patches: int = 196,
         grid_size: int = 14,
+        gumbel_tau: float = 0.0,
     ):
         super().__init__()
         self.vit = vit
@@ -162,6 +163,7 @@ class TimmViTWithThinning(nn.Module):
         self.debug = debug
         self.use_anatomical_prior = use_anatomical_prior
         self.num_patches = num_patches
+        self.gumbel_tau = gumbel_tau
 
         self.enable_early_exit = enable_early_exit
         self.exit_blocks = tuple(exit_blocks)
@@ -247,7 +249,7 @@ class TimmViTWithThinning(nn.Module):
                         m_token_list.append(scores)  # for L_anatomy
                     x = maybe_thin_after_block(
                         x, block_idx=i, schedule=self.schedule,
-                        method="learnable", score_head=sh
+                        method="learnable", score_head=sh, gumbel_tau=self.gumbel_tau
                     )
                 else:
                     x = maybe_thin_after_block(
@@ -333,10 +335,12 @@ def build_vit2d(
     exit_blocks=(3, 7, 11),
     exit_dropout: float = 0.0,
     use_anatomical_prior: bool = False,
+    gumbel_tau: float = 0.0,
+    pretrained: bool = True,
 ):
     vit = timm.create_model(
         "vit_base_patch16_224",
-        pretrained=True,
+        pretrained=pretrained,
         in_chans=1,
         num_classes=num_classes,
     )
@@ -360,6 +364,7 @@ def build_vit2d(
             use_anatomical_prior=use_anatomical_prior,
             num_patches=num_patches,
             grid_size=grid_size,
+            gumbel_tau=gumbel_tau,
         )
 
     schedule = ThinningSchedule(
@@ -386,4 +391,5 @@ def build_vit2d(
         use_anatomical_prior=use_anatomical_prior,
         num_patches=num_patches,
         grid_size=grid_size,
+        gumbel_tau=gumbel_tau,
     )

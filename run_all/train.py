@@ -39,7 +39,7 @@ def parse_args():
     p.add_argument(
         "--label_map",
         default="CN=0,AD=1",
-        help='Binary: "CN=0,AD=1". Ternary: "CN=0,MCI=1,AD=2"'
+        help='Binary (CN vs AD): "CN=0,AD=1"'
     )
 
     # ---- Input type ----
@@ -105,6 +105,12 @@ def parse_args():
         default="l2",
         choices=["l2", "random", "attn", "learnable"],
         help="Token thinning method (learnable = Proposal §3.3 ScoreHead)"
+    )
+    p.add_argument(
+        "--gumbel_tau",
+        type=float,
+        default=1.0,
+        help="Proposal §3.4: Gumbel-Softmax temperature for learnable thinning (0=hard only)"
     )
     p.add_argument(
         "--debug_thin",
@@ -204,6 +210,11 @@ def parse_args():
         type=float,
         default=0.0,
         help="Proposal §3.8: weight for budget-aware L_sparse = Σ(N_ℓ/N_0 - r_ℓ)²"
+    )
+    p.add_argument(
+        "--no_pretrained",
+        action="store_true",
+        help="Use randomly initialized ViT (no ImageNet weights). For offline/air-gapped runs."
     )
 
     return p.parse_args()
@@ -497,6 +508,8 @@ def main():
         enable_early_exit=args.early_exit,
         exit_blocks=tuple(args.exit_blocks),
         use_anatomical_prior=args.use_anatomical_prior,
+        gumbel_tau=args.gumbel_tau if args.thin_method == "learnable" else 0.0,
+        pretrained=not args.no_pretrained,
     ).to(device)
 
     teacher = None
@@ -508,6 +521,7 @@ def main():
             debug_thin=False,
             enable_early_exit=args.teacher_early_exit,
             exit_blocks=tuple(args.exit_blocks),
+            pretrained=not args.no_pretrained,
         ).to(device)
         ckpt = torch.load(args.teacher_ckpt, map_location=device)
         teacher.load_state_dict(ckpt, strict=True)
@@ -639,6 +653,7 @@ def main():
         "z_frac": args.z_frac,
         "thinning": args.thinning,
         "thin_method": args.thin_method,
+        "gumbel_tau": args.gumbel_tau,
         "early_exit": args.early_exit,
         "tau": args.tau,
         "tau_u": args.tau_u,

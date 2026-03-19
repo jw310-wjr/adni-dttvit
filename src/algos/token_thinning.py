@@ -97,6 +97,15 @@ def _compute_k(N: int, keep_ratio: float) -> int:
 
 
 # -------------------------
+# Gumbel-Softmax for differentiable Top-K (Proposal §3.4)
+# -------------------------
+def _gumbel_softmax_weights(scores: torch.Tensor, tau: float = 1.0) -> torch.Tensor:
+    """Gumbel-Softmax: soft weights for differentiable selection. scores: [B, N] -> [B, N]"""
+    gumbel = -torch.log(-torch.log(torch.rand_like(scores, device=scores.device) + 1e-10) + 1e-10)
+    return torch.softmax((scores + gumbel) / tau, dim=1)
+
+
+# -------------------------
 # Learnable thinning (Proposal §3.3, §3.4)
 # -------------------------
 def thin_tokens_learnable(
@@ -104,10 +113,12 @@ def thin_tokens_learnable(
     score_head: nn.Module,
     keep_ratio: float,
     keep_cls: bool = True,
+    gumbel_tau: float = 0.0,
 ) -> torch.Tensor:
     """
-    Learnable token thinning. ScoreHead produces importance scores; hard Top-K.
-    Gradients flow to ScoreHead via downstream loss.
+    Learnable token thinning (Proposal §3.3, §3.4).
+    - Training with gumbel_tau > 0: Gumbel-Softmax relaxation for differentiable Top-K.
+    - Inference or gumbel_tau=0: hard Top-K (gradients via straight-through).
     """
     if not (0.0 < keep_ratio <= 1.0):
         raise ValueError(f"keep_ratio must be in (0,1], got {keep_ratio}")
@@ -123,6 +134,17 @@ def thin_tokens_learnable(
     scores = score_head(toks)  # [B, N]
     idx = _topk_indices(scores, k)
     toks_kept = _gather_tokens(toks, idx)
+
+    if gumbel_tau > 0 and score_head.training and toks.requires_grad:
+        # Gumbel-Softmax: soft weights for selected tokens, gradients flow to ScoreHead
+        soft_w = _gumbel_softmax_weights(scores, tau=gumbel_tau)
+        soft_w_sel = torch.gather(soft_w, 1, idx)  # [B, k]
+        soft_w_sel = soft_w_sel / (soft_w_sel.sum(dim=1, keepdim=True) + 1e-8)
+        # Straight-through: forward = toks_kept, backward = scaled (grad flows to scores)
+        toks_kept = toks_kept * soft_w_sel.unsqueeze(-1) + (
+            toks_kept * (1 - soft_w_sel.unsqueeze(-1))
+        ).detach()
+
     return torch.cat([cls, toks_kept], dim=1) if keep_cls else toks_kept
 
 
@@ -279,6 +301,7 @@ def maybe_thin_after_block(
     method: str = "l2",
     attn: Optional[torch.Tensor] = None,
     score_head: Optional[nn.Module] = None,
+    gumbel_tau: float = 0.0,
 ) -> torch.Tensor:
     """
     Helper: after running block_idx, apply thinning if schedule says so.
@@ -304,6 +327,8 @@ def maybe_thin_after_block(
     if method == "learnable":
         if score_head is None:
             raise ValueError("method='learnable' requires score_head for this block")
-        return thin_tokens_learnable(x, score_head=score_head, keep_ratio=r, keep_cls=True)
+        return thin_tokens_learnable(
+            x, score_head=score_head, keep_ratio=r, keep_cls=True, gumbel_tau=gumbel_tau
+        )
 
     raise ValueError(f"Unknown thinning method: {method}")

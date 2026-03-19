@@ -1,0 +1,12 @@
+config,test_acc,test_auroc,ms_per_sample,speedup,avg_exit,num_params_M,peak_memory_MB,GFLOPs
+Baseline,,,,,,,,
+Only_EE,,,,,,,,
+DTT_L2_only,,,,,,,,
+DTT_Attn_only,,,,,,,,
+DTT_Random_only,,,,,,,,
+DTT_Learnable_only,,,,,,,,
+DTT_L2+EE,,,,,,,,
+DTT_Attn+EE,,,,,,,,
+DTT_Random+EE,,,,,,,,
+DTT_Learnable+EE,,,,,,,,
+Student,,,,,,,,

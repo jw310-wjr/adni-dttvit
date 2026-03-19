@@ -9,7 +9,7 @@ import torch.nn.functional as F
 class ADNINPY2DDataset(Dataset):
     """
     Read 2D slices saved as .npy from a manifest CSV.
-    Required columns: npy_path, label (string label like CN/MCI/AD or int)
+    Required columns: npy_path, label (string: CN or AD for binary)
     """
     def __init__(self, csv_path, label_map, data_root="."):
         self.df = pd.read_csv(csv_path)
@@ -33,13 +33,13 @@ class ADNINPY2DDataset(Dataset):
 
         x = np.load(p).astype(np.float32)          # (H, W), already normalized to [0,1] in your script
         x = torch.from_numpy(x)[None, ...]         # (1, H, W)
-       # resize to 224x224 for ViT
+        # resize to 224x224 for ViT
         x = F.interpolate(
-        x.unsqueeze(0),      # (1,1,H,W)
-        size=(224, 224),
-        mode="bilinear",
-        align_corners=False
-    ).squeeze(0)             # (1,224,224)
+            x.unsqueeze(0),  # (1, 1, H, W)
+            size=(224, 224),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)  # (1, 224, 224)
 
         y_raw = r["label"]
         if isinstance(y_raw, str):

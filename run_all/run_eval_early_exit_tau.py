@@ -34,6 +34,7 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--out_csv", default="results/early_exit_tau_results.csv")
     p.add_argument("--thin_method", default="attn")
+    p.add_argument("--no_pretrained", action="store_true", help="Skip ImageNet weights (use when loading from checkpoint)")
     return p.parse_args()
 
 
@@ -84,6 +85,7 @@ def main():
         thinning=True,
         thin_method=args.thin_method,
         enable_early_exit=True,
+        pretrained=not args.no_pretrained,
     ).to(device)
     model.load_state_dict(torch.load(args.ckpt, map_location=device), strict=True)
 

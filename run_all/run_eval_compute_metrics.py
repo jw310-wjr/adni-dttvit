@@ -31,6 +31,12 @@ from src.data.dataset_nii2d import Nii2DSliceDataset
 from src.models.vit2d import build_vit2d
 
 try:
+    from sklearn.metrics import roc_auc_score
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
+try:
     from ptflops import get_model_complexity_info  # type: ignore
     HAS_PTFLOPS = True
 except ImportError:
@@ -51,6 +57,7 @@ def parse_args():
     p.add_argument("--tau_u", type=float, default=None, help="Proposal §3.6: entropy threshold for uncertainty-guided exit")
     p.add_argument("--warmup", type=int, default=5, help="Warmup batches before timing")
     p.add_argument("--out_csv", default="results/compute_metrics.csv")
+    p.add_argument("--no_pretrained", action="store_true", help="Skip ImageNet weights (use when loading from checkpoint)")
     return p.parse_args()
 
 
@@ -94,12 +101,15 @@ def count_flops(model, device, input_shape=(1, 224, 224)):
 
 
 @torch.no_grad()
-def evaluate_with_timing(model, loader, device, tau=None, tau_u=None, warmup=5):
+def evaluate_with_timing(model, loader, device, tau=None, tau_u=None, warmup=5, collect_for_auroc=False):
+    """Proposal §4.2: Accuracy, AUROC, ms/sample, avg_exit, peak_memory."""
     model.eval()
     correct = 0
     total = 0
     exit_counts = {1: 0, 2: 0, 3: 0} if tau else None
     times = []
+    all_logits = []
+    all_labels = []
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats()
@@ -112,15 +122,16 @@ def evaluate_with_timing(model, loader, device, tau=None, tau_u=None, warmup=5):
         t0 = time.perf_counter()
         if tau:
             out = model(x, tau=tau, tau_u=tau_u)
-            if isinstance(out, tuple) and len(out) == 2:
-                logits, exit_layer = out
+            if isinstance(out, tuple) and len(out) >= 2:
+                logits, exit_layer = out[0], out[1]
                 for k in (1, 2, 3):
                     exit_counts[k] += (exit_layer == k).sum().item()
             else:
                 logits = out
                 exit_counts[3] += x.size(0)
         else:
-            logits = model(x)
+            out = model(x) if not hasattr(model, "forward_all") else model.forward_all(x)[2]
+            logits = out[0] if isinstance(out, tuple) else out
         if device.type == "cuda":
             torch.cuda.synchronize()
         dt = time.perf_counter() - t0
@@ -129,6 +140,9 @@ def evaluate_with_timing(model, loader, device, tau=None, tau_u=None, warmup=5):
         pred = logits.argmax(dim=1)
         correct += (pred == y).sum().item()
         total += y.numel()
+        if collect_for_auroc and HAS_SKLEARN:
+            all_logits.append(logits.cpu())
+            all_labels.append(y.cpu())
 
     acc = correct / max(total, 1)
     n_batches_timed = len(times)
@@ -141,7 +155,18 @@ def evaluate_with_timing(model, loader, device, tau=None, tau_u=None, warmup=5):
     if device.type == "cuda":
         peak_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
 
-    return acc, ms_per_sample, avg_exit, exit_counts, peak_mb
+    auroc = None
+    if collect_for_auroc and HAS_SKLEARN and all_logits:
+        logits_cat = torch.cat(all_logits, dim=0)
+        labels_cat = torch.cat(all_labels, dim=0)
+        probs = torch.softmax(logits_cat, dim=1)
+        num_classes = probs.size(1)
+        if num_classes == 2:
+            auroc = roc_auc_score(labels_cat.numpy(), probs[:, 1].numpy())
+        elif num_classes > 2:
+            auroc = roc_auc_score(labels_cat.numpy(), probs.numpy(), multi_class="ovr", average="macro")
+
+    return acc, auroc, ms_per_sample, avg_exit, exit_counts, peak_mb
 
 
 def default_run_dirs(project_root):
@@ -188,7 +213,7 @@ def main():
         if not os.path.exists(ckpt_path):
             print(f"Skip {name}: {ckpt_path} not found")
             rows.append({
-                "config": name, "test_acc": None, "ms_per_sample": None,
+                "config": name, "test_acc": None, "test_auroc": None, "ms_per_sample": None,
                 "speedup": None, "avg_exit": None, "num_params_M": None, "peak_memory_MB": None,
                 "GFLOPs": None,
             })
@@ -206,12 +231,14 @@ def main():
             thin_method=thin_method,
             enable_early_exit=early_exit,
             use_anatomical_prior=use_anatomical_prior,
+            pretrained=not args.no_pretrained,
         ).to(device)
         model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=True)
 
         tau = args.tau if early_exit else None
-        acc, ms, avg_exit, _, peak_mb = evaluate_with_timing(
-            model, loader, device, tau=tau, tau_u=args.tau_u, warmup=args.warmup
+        acc, auroc, ms, avg_exit, _, peak_mb = evaluate_with_timing(
+            model, loader, device, tau=tau, tau_u=args.tau_u, warmup=args.warmup,
+            collect_for_auroc=True,
         )
 
         num_params = count_params(model)
@@ -223,6 +250,7 @@ def main():
         rows.append({
             "config": name,
             "test_acc": acc,
+            "test_auroc": auroc,
             "ms_per_sample": ms,
             "speedup": speedup,
             "avg_exit": avg_exit,
@@ -232,7 +260,8 @@ def main():
         })
         gf = f" GFLOPs={gflops}" if gflops else ""
         pm = f" peak_mb={peak_mb:.1f}" if peak_mb else ""
-        print(f"{name}: acc={acc:.4f} ms/sample={ms:.2f} speedup={speedup:.2f}x avg_exit={avg_exit}{pm}{gf}")
+        auc_s = f" AUROC={auroc:.4f}" if auroc is not None else ""
+        print(f"{name}: acc={acc:.4f}{auc_s} ms/sample={ms:.2f} speedup={speedup:.2f}x avg_exit={avg_exit}{pm}{gf}")
 
     # Speedup = ref_time / this_time (first model as ref)
 
@@ -241,21 +270,44 @@ def main():
     df.to_csv(args.out_csv, index=False)
     print(f"\nSaved: {args.out_csv}")
 
+    # Proposal §4.3: Pareto front (accuracy vs FLOPs)
+    if "GFLOPs" in df.columns and "test_acc" in df.columns:
+        valid = df.dropna(subset=["test_acc", "GFLOPs"])
+        if len(valid) >= 2:
+            try:
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(8, 5))
+                for _, r in valid.iterrows():
+                    ax.scatter(r["GFLOPs"], r["test_acc"] * 100, label=r["config"], s=80)
+                ax.set_xlabel("GFLOPs")
+                ax.set_ylabel("Test Accuracy (%)")
+                ax.set_title("Proposal §4.3: Token Retention vs Performance (Accuracy vs FLOPs)")
+                ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
+                ax.grid(True, alpha=0.3)
+                pareto_path = args.out_csv.replace(".csv", "_pareto.png")
+                plt.tight_layout()
+                plt.savefig(pareto_path, dpi=150, bbox_inches="tight")
+                plt.close()
+                print(f"Pareto plot: {pareto_path}")
+            except ImportError:
+                pass
+
     # Also write markdown
     md_path = args.out_csv.replace(".csv", ".md")
     with open(md_path, "w") as f:
-        f.write("# Accuracy vs Compute\n\n")
-        f.write("| Config | Test Acc (%) | ms/sample | Speedup | Avg Exit | Params (M) | Peak Mem (MB) | GFLOPs |\n")
-        f.write("|--------|--------------|------------|---------|----------|------------|---------------|--------|\n")
+        f.write("# Accuracy / AUROC vs Compute (Proposal §4.2)\n\n")
+        f.write("| Config | Test Acc (%) | AUROC | ms/sample | Speedup | Avg Exit | Params (M) | Peak Mem (MB) | GFLOPs |\n")
+        f.write("|--------|--------------|-------|------------|---------|----------|------------|---------------|--------|\n")
         for _, r in df.iterrows():
             acc_s = f"{r['test_acc']*100:.2f}" if pd.notna(r["test_acc"]) else "—"
+            auc_s = f"{r['test_auroc']:.4f}" if "test_auroc" in r and pd.notna(r.get("test_auroc")) else "—"
             ms_s = f"{r['ms_per_sample']:.1f}" if pd.notna(r["ms_per_sample"]) else "—"
             sp_s = f"{r['speedup']:.2f}x" if pd.notna(r["speedup"]) else "—"
             ex_s = f"{r['avg_exit']:.2f}" if pd.notna(r["avg_exit"]) else "—"
             pm_s = f"{r['num_params_M']:.2f}" if pd.notna(r["num_params_M"]) else "—"
             mem_s = f"{r['peak_memory_MB']:.1f}" if pd.notna(r["peak_memory_MB"]) else "—"
             gf_s = f"{r['GFLOPs']:.2f}" if pd.notna(r["GFLOPs"]) else "—"
-            f.write(f"| {r['config']} | {acc_s} | {ms_s} | {sp_s} | {ex_s} | {pm_s} | {mem_s} | {gf_s} |\n")
+            f.write(f"| {r['config']} | {acc_s} | {auc_s} | {ms_s} | {sp_s} | {ex_s} | {pm_s} | {mem_s} | {gf_s} |\n")
     print(f"Markdown: {md_path}")
 
 
