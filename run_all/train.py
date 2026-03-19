@@ -77,7 +77,7 @@ def parse_args():
     )
 
     # training
-    p.add_argument("--epochs", type=int, default=1)
+    p.add_argument("--epochs", type=int, default=50, help="Default 50, aligned with SLURM baseline config")
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--lr", type=float, default=3e-4)
@@ -249,13 +249,15 @@ def get_device():
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, tau=None, tau_u=None):
+def evaluate(model, loader, device, tau=None, tau_u=None, criterion=None):
     """
     If tau is set: uncertainty-guided early exit (Proposal §3.6) with tau, tau_u.
+    If criterion is set: also returns val_loss for logging.
     """
     model.eval()
     correct = 0
     total = 0
+    total_loss = 0.0
     exit_counts = {1: 0, 2: 0, 3: 0} if tau is not None else None
 
     for x, y in loader:
@@ -276,12 +278,17 @@ def evaluate(model, loader, device, tau=None, tau_u=None):
 
         correct += (pred == y).sum().item()
         total += y.numel()
+        if criterion is not None:
+            total_loss += criterion(logits, y).item()
 
     acc = correct / max(total, 1)
+    val_loss = total_loss / max(len(loader), 1) if criterion is not None else None
     if tau is not None:
         avg_exit = (1 * exit_counts[1] + 2 * exit_counts[2] + 3 * exit_counts[3]) / max(total, 1)
+        if criterion is not None:
+            return acc, exit_counts, avg_exit, val_loss
         return acc, exit_counts, avg_exit
-    return acc
+    return (acc, val_loss) if criterion is not None else acc
 
 
 def _compute_aux_losses(model, aux, lambda_anatomy, lambda_sparse, schedule):
@@ -318,9 +325,12 @@ def train_one_epoch(
 ):
     """
     If early_exit: multi-head CE + optional L_anatomy, L_sparse (Proposal).
+    Returns (train_loss, train_acc).
     """
     model.train()
     total_loss = 0.0
+    correct = 0
+    total = 0
     schedule = getattr(model, "schedule", None) or type("S", (), {"ratio_after_block": lambda i: None})()
 
     for x, y in loader:
@@ -334,25 +344,31 @@ def train_one_epoch(
                 if early_exit:
                     loss = loss + alpha * criterion(logits1, y) + beta * criterion(logits2, y)
                 loss = loss + _compute_aux_losses(model, aux, lambda_anatomy, lambda_sparse, schedule)
+                logits = logits3
             else:
                 logits = model(x)
                 loss = criterion(logits, y)
-            return loss
+            return loss, logits
 
         if scaler is not None:
             with torch.autocast(device_type="cuda", dtype=torch.float16):
-                loss = _step()
+                loss, logits = _step()
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss = _step()
+            loss, logits = _step()
             loss.backward()
             optimizer.step()
 
         total_loss += loss.item()
+        pred = logits.argmax(dim=1)
+        correct += (pred == y).sum().item()
+        total += y.numel()
 
-    return total_loss / max(len(loader), 1)
+    train_loss = total_loss / max(len(loader), 1)
+    train_acc = correct / max(total, 1)
+    return train_loss, train_acc
 
 
 def train_one_epoch_distill(
@@ -375,10 +391,13 @@ def train_one_epoch_distill(
     """
     Proposal §3.7: L = L_cls + λ1*L_KD + λ2*L_feat + λ3*L_sparse + λ4*L_anatomy
     L_feat = ||f_student - f_teacher||²
+    Returns (train_loss, train_acc).
     """
     student.train()
     teacher.eval()
     total_loss = 0.0
+    correct = 0
+    total = 0
     kl_fn = nn.KLDivLoss(reduction="batchmean")
     schedule = getattr(student, "schedule", None) or type("S", (), {"ratio_after_block": lambda i: None})()
 
@@ -430,8 +449,13 @@ def train_one_epoch_distill(
             optimizer.step()
 
         total_loss += loss.item()
+        pred = student_logits.argmax(dim=1)
+        correct += (pred == y).sum().item()
+        total += y.numel()
 
-    return total_loss / max(len(loader), 1)
+    train_loss = total_loss / max(len(loader), 1)
+    train_acc = correct / max(total, 1)
+    return train_loss, train_acc
 
 
 def ensure_outdir(out_dir: str):
@@ -444,14 +468,17 @@ def init_log(out_dir: str):
     if not os.path.exists(log_path):
         with open(log_path, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["time", "epoch", "train_loss", "val_acc"])
+            w.writerow(["time", "epoch", "train_loss", "train_acc", "val_acc", "val_loss"])
     return log_path
 
 
-def append_log(log_path: str, epoch: int, train_loss: float, val_acc: float):
+def append_log(log_path: str, epoch: int, train_loss: float, train_acc: float, val_acc: float, val_loss: float):
     with open(log_path, "a", newline="") as f:
         w = csv.writer(f)
-        w.writerow([time.strftime("%Y-%m-%d %H:%M:%S"), epoch, f"{train_loss:.6f}", f"{val_acc:.6f}"])
+        w.writerow([
+            time.strftime("%Y-%m-%d %H:%M:%S"), epoch,
+            f"{train_loss:.6f}", f"{train_acc:.6f}", f"{val_acc:.6f}", f"{val_loss:.6f}"
+        ])
 
 
 def main():
@@ -597,7 +624,7 @@ def main():
     for ep in range(args.epochs):
         t0 = time.time()
         if use_distill:
-            train_loss = train_one_epoch_distill(
+            train_loss, train_acc = train_one_epoch_distill(
                 model,
                 teacher,
                 train_loader,
@@ -615,7 +642,7 @@ def main():
                 lambda_sparse=args.lambda_sparse,
             )
         else:
-            train_loss = train_one_epoch(
+            train_loss, train_acc = train_one_epoch(
                 model,
                 train_loader,
                 optimizer,
@@ -630,16 +657,16 @@ def main():
             )
 
         if args.tau is None:
-            val_acc = evaluate(model, val_loader, device)
+            val_acc, val_loss = evaluate(model, val_loader, device, criterion=criterion)
         else:
-            val_acc, exit_counts, avg_exit = evaluate(
-                model, val_loader, device, tau=args.tau, tau_u=args.tau_u
+            val_acc, exit_counts, avg_exit, val_loss = evaluate(
+                model, val_loader, device, tau=args.tau, tau_u=args.tau_u, criterion=criterion
             )
             print(f"[val early-exit] tau={args.tau} exit_counts={exit_counts} avg_exit={avg_exit:.3f}")
 
         dt = time.time() - t0
-        print(f"[epoch {ep}] train_loss={train_loss:.4f} val_acc={val_acc:.4f} time={dt:.1f}s")
-        append_log(log_path, ep, train_loss, val_acc)
+        print(f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} val_acc={val_acc:.4f} val_loss={val_loss:.4f} time={dt:.1f}s")
+        append_log(log_path, ep, train_loss, train_acc, val_acc, val_loss)
 
         if val_acc > best_val:
             best_val = val_acc
