@@ -2,12 +2,25 @@
 """
 Build manifest: merge metadata with NIfTI paths.
 Use --preprocessed to point nifti_path to MNI-registered (syn/) images for training.
+
+When scanning data/adni_nifti/<Subject>/, any *.nii.gz with "mask" in the filename
+(case-insensitive) is skipped so auxiliary masks do not break the one-scan-per-folder rule.
 """
 import argparse
 import os
 from pathlib import Path
 
 import pandas as pd
+
+
+def _subject_scan_niftis(subject_dir: Path) -> list:
+    """*.nii.gz under subject dir, excluding obvious mask/aux files (e.g. test_mask.nii.gz)."""
+    out = []
+    for p in subject_dir.glob("*.nii.gz"):
+        if "mask" in p.name.lower():
+            continue
+        out.append(p)
+    return sorted(out, key=lambda x: x.name)
 
 
 def main():
@@ -31,7 +44,7 @@ def main():
     records = []
     for subject_dir in nifti_root.iterdir():
         if subject_dir.is_dir():
-            nii_files = list(subject_dir.glob("*.nii.gz"))
+            nii_files = _subject_scan_niftis(subject_dir)
             if len(nii_files) == 1:
                 records.append({
                     "Subject": subject_dir.name,
