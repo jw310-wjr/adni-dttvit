@@ -30,6 +30,12 @@ def parse_args():
     p.add_argument("--thin_method", default="attn", choices=["l2", "attn", "random", "learnable"],
                    help="DTT method: l2/attn/random (heuristic) or learnable (ScoreHead)")
     p.add_argument("--train_extra", default="", help="Extra args for train.py (e.g. --amp)")
+    p.add_argument(
+        "--z_index",
+        type=int,
+        default=77,
+        help="Fixed slice index for all ablation configs (run slice_selection first to pick a good z)",
+    )
     p.add_argument("--skip_train", action="store_true", help="Skip training, only plot from existing results")
     return p.parse_args()
 
@@ -52,7 +58,7 @@ def run_training(args, train_script):
             "--manifest_dir", args.manifest_dir,
             "--data_root", args.data_root,
             "--slice_selector", "fixed",
-            "--z_index", "77",
+            "--z_index", str(args.z_index),
             "--out_dir", out_dir,
             "--epochs", str(args.epochs),
             "--batch_size", str(args.batch_size),

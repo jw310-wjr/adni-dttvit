@@ -13,7 +13,8 @@ set -euo pipefail
 PROJECT=/scratch/jw310/adni-dttvit
 VENV=/scratch/jw310/venvs/torch_fix/bin/activate
 
-echo "=== ViT2D Baseline (fixed z=77) ==="
+Z_INDEX="${Z_INDEX:-77}"
+echo "=== ViT2D Baseline (fixed z=${Z_INDEX}) ==="
 hostname
 date
 echo
@@ -27,11 +28,12 @@ cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
 # Training protocol: see HPC_QUICKSTART.md § "Fixed training protocol (anti-overfit baseline)"
+# After slice_selection: Z_INDEX=<best from results/z_results.csv> sbatch slurm/active/baseline.sbatch
 python run_all/train.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
   --slice_selector fixed \
-  --z_index 77 \
+  --z_index "${Z_INDEX}" \
   --epochs 30 \
   --batch_size 8 \
   --num_workers 4 \

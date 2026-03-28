@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH -c 4
 #SBATCH --mem=32G
-#SBATCH -t 48:00:00
+#SBATCH -t 24:00:00
 #SBATCH -o /scratch/jw310/adni-dttvit/runs/logs/compare_thin_methods_%j.out
 #SBATCH -e /scratch/jw310/adni-dttvit/runs/logs/compare_thin_methods_%j.err
 
