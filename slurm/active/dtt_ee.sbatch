@@ -34,9 +34,11 @@ python run_all/train.py \
   --data_root ${PROJECT} \
   --slice_selector fixed \
   --z_index 77 \
-  --epochs 50 \
+  --epochs 30 \
   --batch_size 8 \
   --num_workers 4 \
+  --lr 1e-4 \
+  --weight_decay 0.1 \
   --out_dir runs/vit2d_dtt_ee_${THIN_METHOD} \
   --amp \
   --thinning \

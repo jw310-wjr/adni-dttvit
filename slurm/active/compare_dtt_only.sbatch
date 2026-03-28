@@ -32,7 +32,9 @@ python run_all/run_compare_dtt_only.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
   --out_base runs/compare_dtt_only \
-  --results_dir results
+  --results_dir results \
+  --epochs 30 \
+  --train_extra "--amp --lr 1e-4 --weight_decay 0.1 --num_workers 4"
 
 echo "=== DONE ==="
 date

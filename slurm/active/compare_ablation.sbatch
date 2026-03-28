@@ -28,6 +28,7 @@ export TIMM_CACHE_DIR=/scratch/jw310/torch_cache/timm
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
+# Same train protocol as baseline (HPC_QUICKSTART.md)
 python run_all/run_compare_ablation.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
@@ -36,7 +37,7 @@ python run_all/run_compare_ablation.py \
   --epochs 30 \
   --batch_size 8 \
   --thin_method attn \
-  --train_extra "--amp"
+  --train_extra "--amp --lr 1e-4 --weight_decay 0.1 --num_workers 4"
 
 echo "=== DONE ==="
 date

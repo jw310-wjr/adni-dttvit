@@ -34,7 +34,7 @@ python run_all/run_compare_thin_methods.py \
   --epochs 30 \
   --batch_size 8 \
   --methods baseline l2 attn random \
-  --train_extra "--amp"
+  --train_extra "--amp --lr 1e-4 --weight_decay 0.1 --num_workers 4"
 
 echo "=== DONE ==="
 date

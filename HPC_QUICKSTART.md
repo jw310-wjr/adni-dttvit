@@ -21,6 +21,22 @@ pip install -r requirements.txt
 
 **If your paths differ** (e.g. project at `/home/user/adni-dttvit`), edit `PROJECT` and `VENV` at the top of each file in `slurm/active/*.sbatch`.
 
+### Fixed training protocol (anti-overfit baseline, same for +DTT / ablation)
+
+All `slurm/active/*.sbatch` jobs that call `train.py` (or wrappers that call it) use **the same optimization settings** so **baseline vs. proposal methods** are compared fairly:
+
+| Setting | Value |
+|--------|--------|
+| Epochs | **30** |
+| Learning rate | **1e-4** |
+| Weight decay | **0.1** |
+| Batch size | **8** |
+| Workers | **4** |
+| Slice | fixed **z_index=77** |
+| AMP | **on** (`--amp` where applicable) |
+
+**Why:** Shorter training + stronger regularization reduces ViT overfitting on small ADNI 2D slice data; `best.pt` is still chosen by **best validation accuracy**. Your manual `baseline_antioverfit.sbatch` matched this protocol; the repo defaults are now aligned.
+
 ---
 
 ## 2. Data Preparation (if not done)

@@ -39,7 +39,8 @@ python run_all/run_teacher_student.py \
   --distill_alpha 0.5 \
   --results_dir results \
   --skip_teacher \
-  --amp
+  --amp \
+  --train_extra "--lr 1e-4 --weight_decay 0.1 --num_workers 4"
 
 echo "=== DONE ==="
 date

@@ -26,14 +26,17 @@ export TIMM_CACHE_DIR=/scratch/jw310/torch_cache/timm
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
+# Training protocol: see HPC_QUICKSTART.md § "Fixed training protocol (anti-overfit baseline)"
 python run_all/train.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
   --slice_selector fixed \
   --z_index 77 \
-  --epochs 50 \
+  --epochs 30 \
   --batch_size 8 \
   --num_workers 4 \
+  --lr 1e-4 \
+  --weight_decay 0.1 \
   --out_dir runs/vit2d_baseline \
   --amp
 
