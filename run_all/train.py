@@ -113,6 +113,36 @@ def parse_args():
         help="Stop after this many epochs without best_metric improvement (0=run all epochs)",
     )
     p.add_argument(
+        "--early_stopping_min_delta",
+        type=float,
+        default=0.005,
+        help="Minimum improvement in best_metric to reset patience (acc/balanced_acc in [0,1])",
+    )
+    p.add_argument(
+        "--lr_scheduler",
+        default="cosine",
+        choices=["none", "cosine"],
+        help="cosine: CosineAnnealingLR to eta_min (softens late-epoch overfitting)",
+    )
+    p.add_argument(
+        "--lr_min_ratio",
+        type=float,
+        default=0.05,
+        help="eta_min = lr * lr_min_ratio when lr_scheduler=cosine",
+    )
+    p.add_argument(
+        "--drop_path_rate",
+        type=float,
+        default=0.0,
+        help="timm stochastic depth (0=off; try 0.08–0.12 on baseline to curb overfit)",
+    )
+    p.add_argument(
+        "--drop_rate",
+        type=float,
+        default=0.0,
+        help="timm dropout on classifier head (often 0; small e.g. 0.1 if needed)",
+    )
+    p.add_argument(
         "--train_aug",
         action="store_true",
         help="Training-only 2D augment (rotate/translate/noise; optional flip via --aug_flip_prob)",
@@ -416,12 +446,22 @@ def _compute_aux_losses(model, aux, lambda_anatomy, lambda_sparse, schedule):
     return loss_aux
 
 
+def _balanced_acc_from_counts(class_correct: List[int], class_total: List[int]) -> float:
+    ncls = sum(1 for c in range(len(class_total)) if class_total[c] > 0)
+    if ncls == 0:
+        return 0.0
+    return float(
+        sum(class_correct[c] / class_total[c] for c in range(len(class_total)) if class_total[c] > 0) / ncls
+    )
+
+
 def train_one_epoch(
     model,
     loader,
     optimizer,
     criterion,
     device,
+    num_classes: int,
     scaler=None,
     early_exit=False,
     alpha=0.3,
@@ -431,12 +471,14 @@ def train_one_epoch(
 ):
     """
     If early_exit: multi-head CE + optional L_anatomy, L_sparse (Proposal).
-    Returns (train_loss, train_acc).
+    Returns (train_loss, train_acc, train_balanced).
     """
     model.train()
     total_loss = 0.0
     correct = 0
     total = 0
+    class_correct = [0] * num_classes
+    class_total = [0] * num_classes
     schedule = getattr(model, "schedule", None) or type("S", (), {"ratio_after_block": lambda i: None})()
 
     for x, y in loader:
@@ -471,10 +513,15 @@ def train_one_epoch(
         pred = logits.argmax(dim=1)
         correct += (pred == y).sum().item()
         total += y.numel()
+        for c in range(num_classes):
+            m = y == c
+            class_total[c] += int(m.sum().item())
+            class_correct[c] += int(((pred == y) & m).sum().item())
 
     train_loss = total_loss / max(len(loader), 1)
     train_acc = correct / max(total, 1)
-    return train_loss, train_acc
+    train_balanced = _balanced_acc_from_counts(class_correct, class_total)
+    return train_loss, train_acc, train_balanced
 
 
 def train_one_epoch_distill(
@@ -493,17 +540,20 @@ def train_one_epoch_distill(
     lambda_feat: float = 0.0,
     lambda_anatomy: float = 0.0,
     lambda_sparse: float = 0.0,
+    num_classes: int = 2,
 ):
     """
     Proposal §3.7: L = L_cls + λ1*L_KD + λ2*L_feat + λ3*L_sparse + λ4*L_anatomy
     L_feat = ||f_student - f_teacher||²
-    Returns (train_loss, train_acc).
+    Returns (train_loss, train_acc, train_balanced).
     """
     student.train()
     teacher.eval()
     total_loss = 0.0
     correct = 0
     total = 0
+    class_correct = [0] * num_classes
+    class_total = [0] * num_classes
     kl_fn = nn.KLDivLoss(reduction="batchmean")
     schedule = getattr(student, "schedule", None) or type("S", (), {"ratio_after_block": lambda i: None})()
 
@@ -558,10 +608,15 @@ def train_one_epoch_distill(
         pred = student_logits.argmax(dim=1)
         correct += (pred == y).sum().item()
         total += y.numel()
+        for c in range(num_classes):
+            m = y == c
+            class_total[c] += int(m.sum().item())
+            class_correct[c] += int(((pred == y) & m).sum().item())
 
     train_loss = total_loss / max(len(loader), 1)
     train_acc = correct / max(total, 1)
-    return train_loss, train_acc
+    train_balanced = _balanced_acc_from_counts(class_correct, class_total)
+    return train_loss, train_acc, train_balanced
 
 
 def ensure_outdir(out_dir: str):
@@ -575,7 +630,16 @@ def init_log(out_dir: str):
         with open(log_path, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(
-                ["time", "epoch", "train_loss", "train_acc", "val_acc", "val_balanced", "val_loss"]
+                [
+                    "time",
+                    "epoch",
+                    "train_loss",
+                    "train_acc",
+                    "train_balanced",
+                    "val_acc",
+                    "val_balanced",
+                    "val_loss",
+                ]
             )
     return log_path
 
@@ -585,6 +649,7 @@ def append_log(
     epoch: int,
     train_loss: float,
     train_acc: float,
+    train_balanced: float,
     val_acc: float,
     val_balanced: float,
     val_loss: float,
@@ -593,7 +658,8 @@ def append_log(
         w = csv.writer(f)
         w.writerow([
             time.strftime("%Y-%m-%d %H:%M:%S"), epoch,
-            f"{train_loss:.6f}", f"{train_acc:.6f}", f"{val_acc:.6f}", f"{val_balanced:.6f}", f"{val_loss:.6f}"
+            f"{train_loss:.6f}", f"{train_acc:.6f}", f"{train_balanced:.6f}",
+            f"{val_acc:.6f}", f"{val_balanced:.6f}", f"{val_loss:.6f}",
         ])
 
 
@@ -675,6 +741,8 @@ def main():
         anatomical_prior_slice=args.anatomical_prior_slice,
         gumbel_tau=args.gumbel_tau if args.thin_method == "learnable" else 0.0,
         pretrained=not args.no_pretrained,
+        drop_rate=args.drop_rate,
+        drop_path_rate=args.drop_path_rate,
     ).to(device)
 
     teacher = None
@@ -690,6 +758,8 @@ def main():
             anatomical_prior_path=args.anatomical_prior_path,
             anatomical_prior_slice=args.anatomical_prior_slice,
             pretrained=not args.no_pretrained,
+            drop_rate=0.0,
+            drop_path_rate=0.0,
         ).to(device)
         ckpt = torch.load(args.teacher_ckpt, map_location=device)
         teacher.load_state_dict(ckpt, strict=True)
@@ -722,6 +792,13 @@ def main():
         label_smoothing=args.label_smoothing,
     )
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = None
+    if args.lr_scheduler == "cosine":
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, args.epochs),
+            eta_min=max(1e-8, args.lr * args.lr_min_ratio),
+        )
 
     use_amp = args.amp and (device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
@@ -758,8 +835,12 @@ def main():
     )
     print(
         f"Regularization: weight_decay={args.weight_decay} label_smoothing={args.label_smoothing} "
+        f"| drop_path_rate={args.drop_path_rate} drop_rate={args.drop_rate} "
         f"| ce_class_weights={args.ce_class_weights} | best_metric={args.best_metric} "
-        f"| early_stopping_patience={args.early_stopping_patience} | "
+        f"| early_stop: patience={args.early_stopping_patience} min_delta={args.early_stopping_min_delta} | "
+        f"lr_scheduler={args.lr_scheduler}"
+        + (f" (eta_min={args.lr * args.lr_min_ratio:.2e})" if scheduler is not None else "")
+        + " | "
         f"train_aug={args.train_aug} (deg={args.aug_deg}, translate={args.aug_translate}, "
         f"noise={args.aug_noise}, flip_p={args.aug_flip_prob})"
     )
@@ -773,7 +854,7 @@ def main():
     for ep in range(args.epochs):
         t0 = time.time()
         if use_distill:
-            train_loss, train_acc = train_one_epoch_distill(
+            train_loss, train_acc, train_balanced = train_one_epoch_distill(
                 model,
                 teacher,
                 train_loader,
@@ -789,14 +870,16 @@ def main():
                 lambda_feat=args.lambda_feat,
                 lambda_anatomy=args.lambda_anatomy,
                 lambda_sparse=args.lambda_sparse,
+                num_classes=num_classes,
             )
         else:
-            train_loss, train_acc = train_one_epoch(
+            train_loss, train_acc, train_balanced = train_one_epoch(
                 model,
                 train_loader,
                 optimizer,
                 criterion,
                 device,
+                num_classes,
                 scaler=scaler,
                 early_exit=args.early_exit,
                 alpha=args.alpha,
@@ -828,7 +911,11 @@ def main():
         else:
             track_now = -float(val_loss)
 
-        improved = track_now > best_track + 1e-6
+        md = args.early_stopping_min_delta
+        if best_track == float("-inf"):
+            improved = True
+        else:
+            improved = track_now > best_track + md
         if improved:
             best_track = track_now
             best_val_acc = val_acc
@@ -840,17 +927,23 @@ def main():
             patience_ctr += 1
 
         dt = time.time() - t0
+        lr_cur = optimizer.param_groups[0]["lr"]
         if args.tau is None:
             print(
-                f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
-                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_loss={val_loss:.4f} time={dt:.1f}s"
+                f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} train_balanced={train_balanced:.4f} "
+                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
             )
         else:
             print(
-                f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
-                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_loss={val_loss:.4f} time={dt:.1f}s"
+                f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} train_balanced={train_balanced:.4f} "
+                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
             )
-        append_log(log_path, ep, train_loss, train_acc, val_acc, val_balanced, val_loss)
+        append_log(
+            log_path, ep, train_loss, train_acc, train_balanced, val_acc, val_balanced, val_loss
+        )
+
+        if scheduler is not None:
+            scheduler.step()
 
         if args.early_stopping_patience > 0 and patience_ctr >= args.early_stopping_patience:
             print(
@@ -918,6 +1011,11 @@ def main():
         "train_class_counts": train_class_counts,
         "ce_weight": ce_weight.detach().cpu().tolist() if ce_weight is not None else None,
         "early_stopping_patience": args.early_stopping_patience,
+        "early_stopping_min_delta": args.early_stopping_min_delta,
+        "lr_scheduler": args.lr_scheduler,
+        "lr_min_ratio": args.lr_min_ratio,
+        "drop_path_rate": args.drop_path_rate,
+        "drop_rate": args.drop_rate,
         "train_aug": args.train_aug,
         "aug_deg": args.aug_deg,
         "aug_translate": args.aug_translate,

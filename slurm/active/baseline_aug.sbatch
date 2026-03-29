@@ -43,6 +43,9 @@ python run_all/train.py \
   --ce_class_weights auto \
   --best_metric balanced_acc \
   --early_stopping_patience 15 \
+  --early_stopping_min_delta 0.005 \
+  --lr_scheduler cosine \
+  --drop_path_rate 0.1 \
   --train_aug \
   --aug_deg 10 \
   --aug_translate 0.03 \

@@ -40,6 +40,8 @@ python run_all/train.py \
   --label_smoothing 0 \
   --ce_class_weights none \
   --best_metric acc \
+  --lr_scheduler none \
+  --drop_path_rate 0 \
   --amp
 
 echo "=== DONE ==="
