@@ -58,6 +58,7 @@ def parse_args():
     p.add_argument("--warmup", type=int, default=5, help="Warmup batches before timing")
     p.add_argument("--out_csv", default="results/compute_metrics.csv")
     p.add_argument("--no_pretrained", action="store_true", help="Skip ImageNet weights (use when loading from checkpoint)")
+    p.add_argument("--z_index", type=int, default=144, help="Fixed slice for eval dataloader (match training)")
     return p.parse_args()
 
 
@@ -196,7 +197,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     csv_path = os.path.join(args.manifest_dir, args.manifest)
-    slice_cfg = {"slice_selector": "fixed", "data_root": args.data_root, "z_index": 77}
+    slice_cfg = {"slice_selector": "fixed", "data_root": args.data_root, "z_index": args.z_index}
     ds = Nii2DSliceDataset(csv_path, label_map=label_map, **slice_cfg)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 

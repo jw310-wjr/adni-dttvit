@@ -13,6 +13,7 @@ set -euo pipefail
 PROJECT=/scratch/jw310/adni-dttvit
 VENV=/scratch/jw310/venvs/torch_fix/bin/activate
 
+# No train_aug here: z is chosen under the same regime as historical sweeps (wd=0.1, no aug).
 echo "=== Slice Selection (find best z) ==="
 hostname
 date

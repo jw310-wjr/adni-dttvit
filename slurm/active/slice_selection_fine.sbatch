@@ -9,6 +9,7 @@
 #SBATCH -e /scratch/jw310/adni-dttvit/runs/logs/slice_selection_fine_%j.err
 
 # Fine search between coarse grid winners (e.g. z=115..144 after first sweep).
+# No train_aug: keep consistent with coarse slice_selection (z chosen without aug).
 # Edit --z_list if you narrow further.
 
 set -euo pipefail

@@ -30,6 +30,12 @@ def parse_args():
     p.add_argument("--methods", nargs="+", default=["baseline", "l2", "attn", "random", "learnable"],
                    help="DTT+EE methods: l2/attn/random (heuristic), learnable (ScoreHead)")
     p.add_argument("--train_extra", default="", help="Extra args for train.py (e.g. --amp)")
+    p.add_argument(
+        "--z_index",
+        type=int,
+        default=144,
+        help="Fixed slice index (match slice_selection / baseline)",
+    )
     p.add_argument("--skip_train", action="store_true", help="Skip training, only plot from existing results")
     return p.parse_args()
 
@@ -47,7 +53,7 @@ def run_training(args, train_script):
             "--manifest_dir", args.manifest_dir,
             "--data_root", args.data_root,
             "--slice_selector", "fixed",
-            "--z_index", "77",
+            "--z_index", str(args.z_index),
             "--out_dir", out_dir,
             "--epochs", str(args.epochs),
             "--batch_size", str(args.batch_size),

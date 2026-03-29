@@ -66,8 +66,8 @@ def parse_args():
     p.add_argument(
         "--z_index",
         type=int,
-        default=77,
-        help="Fixed z slice index (used when slice_selector=fixed). 77 ≈ middle for ~155 slices"
+        default=144,
+        help="Fixed z slice index (used when slice_selector=fixed); align with slice_selection on MNI volumes",
     )
     p.add_argument(
         "--z_frac",

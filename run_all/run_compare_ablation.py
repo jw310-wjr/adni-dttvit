@@ -33,7 +33,7 @@ def parse_args():
     p.add_argument(
         "--z_index",
         type=int,
-        default=77,
+        default=144,
         help="Fixed slice index for all ablation configs (run slice_selection first to pick a good z)",
     )
     p.add_argument("--skip_train", action="store_true", help="Skip training, only plot from existing results")

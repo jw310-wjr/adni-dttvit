@@ -68,6 +68,12 @@ def parse_args():
     p.add_argument("--amp", action="store_true")
     p.add_argument("--train_extra", default="")
     p.add_argument("--results_dir", default="results")
+    p.add_argument(
+        "--z_index",
+        type=int,
+        default=144,
+        help="Fixed slice index (match slice_selection / baseline)",
+    )
     return p.parse_args()
 
 
@@ -94,7 +100,7 @@ def main():
             "--manifest_dir", args.manifest_dir,
             "--data_root", args.data_root,
             "--slice_selector", "fixed",
-            "--z_index", "77",
+            "--z_index", str(args.z_index),
             "--out_dir", args.teacher_out,
             "--epochs", str(args.epochs),
             "--batch_size", str(args.batch_size),
@@ -115,7 +121,7 @@ def main():
         "--manifest_dir", args.manifest_dir,
         "--data_root", args.data_root,
         "--slice_selector", "fixed",
-        "--z_index", "77",
+        "--z_index", str(args.z_index),
         "--thinning",
         "--thin_method", args.thin_method,
         "--early_exit",

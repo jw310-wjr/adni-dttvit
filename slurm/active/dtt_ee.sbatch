@@ -29,16 +29,23 @@ export TIMM_CACHE_DIR=/scratch/jw310/torch_cache/timm
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
+Z_INDEX="${Z_INDEX:-144}"
 python run_all/train.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
   --slice_selector fixed \
-  --z_index 77 \
+  --z_index "${Z_INDEX}" \
   --epochs 30 \
   --batch_size 8 \
   --num_workers 4 \
   --lr 1e-4 \
-  --weight_decay 0.1 \
+  --weight_decay 0.15 \
+  --label_smoothing 0.08 \
+  --train_aug \
+  --aug_deg 12 \
+  --aug_translate 0.04 \
+  --aug_noise 0.03 \
+  --aug_flip_prob 0.0 \
   --out_dir runs/vit2d_dtt_ee_${THIN_METHOD} \
   --amp \
   --thinning \

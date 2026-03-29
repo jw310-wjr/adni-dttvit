@@ -26,18 +26,20 @@ export TIMM_CACHE_DIR=/scratch/jw310/torch_cache/timm
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
+Z_INDEX="${Z_INDEX:-144}"
 python run_all/run_teacher_student.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
   --epochs 30 \
   --batch_size 8 \
+  --z_index "${Z_INDEX}" \
   --teacher_out runs/teacher \
   --student_out runs/student_distill \
   --distill_temp 4.0 \
   --distill_alpha 0.5 \
   --results_dir results \
   --amp \
-  --train_extra "--lr 1e-4 --weight_decay 0.1 --num_workers 4"
+  --train_extra "--lr 1e-4 --weight_decay 0.15 --num_workers 4 --label_smoothing 0.08 --train_aug --aug_deg 12 --aug_translate 0.04 --aug_noise 0.03 --aug_flip_prob 0.0"
 
 echo "=== DONE ==="
 date

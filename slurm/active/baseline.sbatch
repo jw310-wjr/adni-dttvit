@@ -8,13 +8,15 @@
 #SBATCH -o /scratch/jw310/adni-dttvit/runs/logs/baseline_%j.out
 #SBATCH -e /scratch/jw310/adni-dttvit/runs/logs/baseline_%j.err
 
+# Protocol: train_aug + label_smoothing + weight_decay 0.15 (requires torchvision).
+
 set -euo pipefail
 
 PROJECT=/scratch/jw310/adni-dttvit
 VENV=/scratch/jw310/venvs/torch_fix/bin/activate
 
-Z_INDEX="${Z_INDEX:-77}"
-echo "=== ViT2D Baseline (fixed z=${Z_INDEX}) ==="
+Z_INDEX="${Z_INDEX:-144}"
+echo "=== ViT2D Baseline (aug+reg, z=${Z_INDEX}) ==="
 hostname
 date
 echo
@@ -38,7 +40,13 @@ python run_all/train.py \
   --batch_size 8 \
   --num_workers 4 \
   --lr 1e-4 \
-  --weight_decay 0.1 \
+  --weight_decay 0.15 \
+  --label_smoothing 0.08 \
+  --train_aug \
+  --aug_deg 12 \
+  --aug_translate 0.04 \
+  --aug_noise 0.03 \
+  --aug_flip_prob 0.0 \
   --out_dir runs/vit2d_baseline \
   --amp
 
