@@ -28,7 +28,7 @@ export TIMM_CACHE_DIR=/scratch/jw310/torch_cache/timm
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
-Z_INDEX="${Z_INDEX:-144}"
+Z_INDEX="${Z_INDEX:-115}"
 python run_all/run_compare_ablation.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
@@ -38,7 +38,7 @@ python run_all/run_compare_ablation.py \
   --batch_size 8 \
   --z_index "${Z_INDEX}" \
   --thin_method attn \
-  --train_extra "--amp --lr 1e-4 --weight_decay 0.01 --num_workers 4 --label_smoothing 0.02 --ce_class_weights auto --train_sampler shuffle --best_metric balanced_acc --early_stopping_patience 15 --early_stopping_min_delta 0.005 --lr_scheduler cosine --warmup_epochs 3 --lr_min_ratio 0.05 --drop_path_rate 0.05 --train_aug --aug_noise 0.015"
+  --train_extra "--amp --lr 1e-4 --weight_decay 0.01 --num_workers 4 --label_smoothing 0.02 --ce_class_weights auto --train_sampler shuffle --best_metric balanced_acc --early_stopping_patience 15 --early_stopping_min_delta 0.005 --lr_scheduler cosine --warmup_epochs 3 --lr_min_ratio 0.05 --drop_path_rate 0.05 --train_aug --aug_noise 0.015 --slice_stack_mode stack3"
 
 echo "=== DONE ==="
 date

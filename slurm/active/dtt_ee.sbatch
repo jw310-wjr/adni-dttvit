@@ -28,12 +28,13 @@ export TIMM_CACHE_DIR=/scratch/jw310/torch_cache/timm
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
-Z_INDEX="${Z_INDEX:-144}"
+Z_INDEX="${Z_INDEX:-115}"
 python run_all/train.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
   --slice_selector fixed \
   --z_index "${Z_INDEX}" \
+  --slice_stack_mode stack3 \
   --epochs 50 \
   --batch_size 8 \
   --num_workers 4 \

@@ -28,7 +28,7 @@ export TORCH_HOME=/scratch/jw310/torch_cache
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
-Z_INDEX="${Z_INDEX:-144}"
+Z_INDEX="${Z_INDEX:-115}"
 python run_all/run_eval_compute_metrics.py \
   --manifest_dir manifests \
   --manifest test.csv \

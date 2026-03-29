@@ -16,7 +16,8 @@ set -euo pipefail
 PROJECT=/scratch/jw310/adni-dttvit
 VENV=/scratch/jw310/venvs/torch_fix/bin/activate
 
-Z_INDEX="${Z_INDEX:-144}"
+# Mainline experiments: stack3, center z=115 (override with Z_INDEX=...)
+Z_INDEX="${Z_INDEX:-115}"
 SLICE_STACK_MODE="${SLICE_STACK_MODE:-stack3}"
 
 echo "=== ViT2D 2.5D Baseline (z=${Z_INDEX}, slice_stack_mode=${SLICE_STACK_MODE}) ==="

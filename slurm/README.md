@@ -2,6 +2,8 @@
 
 Submit jobs from project root (e.g. `/scratch/jw310/adni-dttvit`).
 
+**Mainline setting (DTT / ablation / teacher scripts below):** `stack3`, center **`z=115`** (env `Z_INDEX` overrides). Pure single-slice baseline is still `baseline.sbatch` (no stack).
+
 ## Prerequisites
 
 ```bash

@@ -28,21 +28,21 @@ export TIMM_CACHE_DIR=/scratch/jw310/torch_cache/timm
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
-Z_INDEX="${Z_INDEX:-144}"
+Z_INDEX="${Z_INDEX:-115}"
 python run_all/run_teacher_student.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
   --epochs 50 \
   --batch_size 8 \
   --z_index "${Z_INDEX}" \
-  --teacher_out runs/teacher \
-  --student_out runs/student_distill \
+  --teacher_out runs/teacher_stack3_z115 \
+  --student_out runs/student_distill_stack3_z115 \
   --distill_temp 4.0 \
   --distill_alpha 0.5 \
   --results_dir results \
   --skip_teacher \
   --amp \
-  --train_extra "--lr 1e-4 --weight_decay 0.01 --num_workers 4 --label_smoothing 0.02 --ce_class_weights auto --train_sampler shuffle --best_metric balanced_acc --early_stopping_patience 15 --early_stopping_min_delta 0.005 --lr_scheduler cosine --warmup_epochs 3 --lr_min_ratio 0.05 --drop_path_rate 0.05 --train_aug --aug_noise 0.015"
+  --train_extra "--lr 1e-4 --weight_decay 0.01 --num_workers 4 --label_smoothing 0.02 --ce_class_weights auto --train_sampler shuffle --best_metric balanced_acc --early_stopping_patience 15 --early_stopping_min_delta 0.005 --lr_scheduler cosine --warmup_epochs 3 --lr_min_ratio 0.05 --drop_path_rate 0.05 --train_aug --aug_noise 0.015 --slice_stack_mode stack3"
 
 echo "=== DONE ==="
 date
