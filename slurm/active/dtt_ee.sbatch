@@ -38,13 +38,13 @@ python run_all/train.py \
   --epochs 50 \
   --batch_size 8 \
   --num_workers 4 \
-  --lr 1e-4 \
-  --weight_decay 0.12 \
-  --label_smoothing 0.05 \
+  --lr 3e-4 \
+  --weight_decay 0.08 \
+  --label_smoothing 0 \
   --train_aug \
-  --aug_deg 12 \
-  --aug_translate 0.04 \
-  --aug_noise 0.03 \
+  --aug_deg 8 \
+  --aug_translate 0.025 \
+  --aug_noise 0.02 \
   --aug_flip_prob 0.0 \
   --out_dir runs/vit2d_dtt_ee_${THIN_METHOD} \
   --amp \
