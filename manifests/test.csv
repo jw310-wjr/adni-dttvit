@@ -1,45 +1,45 @@
 Image Data ID,Subject,Group,Sex,Age,Visit,Modality,Description,Type,Acq Date,Format,Downloaded,nifti_path
-I37076,941_S_1197,CN,F,82,sc,MRI,MPRAGE,Original,1/20/2007,DCM,Yes,data/adni_nifti/941_S_1197/941_S_1197_MPRAGE_20070120101203_3.nii.gz
-I14561,131_S_0457,AD,F,83,sc,MRI,MP-RAGE,Original,5/03/2006,DCM,Yes,data/adni_nifti/131_S_0457/131_S_0457_ADNI_12M4_TS_2_20060503142527_2.nii.gz
-I20543,129_S_0778,CN,M,73,sc,MRI,MP-RAGE,Original,8/14/2006,DCM,Yes,data/adni_nifti/129_S_0778/129_S_0778_MP-RAGE_20060814132113_2.nii.gz
-I16090,128_S_0545,CN,M,72,sc,MRI,MP-RAGE,Original,5/24/2006,DCM,Yes,data/adni_nifti/128_S_0545/128_S_0545_ADNI_9.1_20060524065744_3.nii.gz
-I15556,128_S_0528,AD,F,71,sc,MRI,MP-RAGE,Original,5/17/2006,DCM,Yes,data/adni_nifti/128_S_0528/128_S_0528_ADNI_9.1_20060517175204_2.nii.gz
-I12459,128_S_0229,CN,F,74,sc,MRI,MP-RAGE,Original,3/08/2006,DCM,Yes,data/adni_nifti/128_S_0229/128_S_0229_ADNI_9.1_20060308151058_2.nii.gz
-I11203,128_S_0167,AD,M,76,sc,MRI,MP-RAGE,Original,2/16/2006,DCM,Yes,data/adni_nifti/128_S_0167/128_S_0167_ADNI_9.1_20060216123829_3.nii.gz
-I23787,127_S_0754,AD,F,68,sc,MRI,MP-RAGE,Original,9/05/2006,DCM,Yes,data/adni_nifti/127_S_0754/127_S_0754_ADNI_patient_protocol_3_20060905124519_2.nii.gz
-I16911,127_S_0622,CN,F,75,sc,MRI,MP-RAGE,Original,6/13/2006,DCM,Yes,data/adni_nifti/127_S_0622/127_S_0622_ADNI_patient_protocol_3_20060613115839_3.nii.gz
-I17905,126_S_0680,CN,M,78,sc,MRI,SAG MP-RAGE,Original,7/05/2006,DCM,Yes,data/adni_nifti/126_S_0680/126_S_0680_ADNI_20060705122945_3.nii.gz
-I11714,123_S_0113,CN,M,75,sc,MRI,ADNI       MPRAGE,Original,3/08/2006,DCM,Yes,data/adni_nifti/123_S_0113/123_S_0113_MPRAGE_20060308182523_201.nii.gz
-I9648,123_S_0091,AD,M,62,sc,MRI,ADNI       MPRAGE,Original,12/23/2005,DCM,Yes,data/adni_nifti/123_S_0091/123_S_0091_MPRAGE_20051223065939_201.nii.gz
-I9752,123_S_0072,CN,M,71,sc,MRI,ADNI       MPRAGE,Original,1/04/2006,DCM,Yes,data/adni_nifti/123_S_0072/123_S_0072_MPRAGE_20060104145656_201.nii.gz
-I35266,109_S_1157,AD,F,85,sc,MRI,MPRAGE,Original,1/03/2007,DCM,Yes,data/adni_nifti/109_S_1157/109_S_1157_MPRAGE_20070103135243_2.nii.gz
-I14952,099_S_0470,AD,F,87,sc,MRI,MPRAGE,Original,5/10/2006,DCM,Yes,data/adni_nifti/099_S_0470/099_S_0470_MPRAGE_20060510132756_2.nii.gz
-I45794,082_S_1377,AD,M,83,sc,MRI,MPRAGE SAG,Original,3/20/2007,DCM,Yes,data/adni_nifti/082_S_1377/082_S_1377_MPRAGE_SAG_20070320105056_2.nii.gz
-I9746,068_S_0109,AD,F,70,sc,MRI,ADNI       MPRAGE,Original,1/03/2006,DCM,Yes,data/adni_nifti/068_S_0109/068_S_0109_MPRAGE_SENSE_20060103165032_601.nii.gz
-I42887,067_S_1253,AD,F,63,sc,MRI,MPRAGE,Original,3/05/2007,DCM,Yes,data/adni_nifti/067_S_1253/067_S_1253_MPRAGE_20070305085432_2.nii.gz
-I9287,067_S_0076,AD,M,78,sc,MRI,MPRAGE,Original,12/06/2005,DCM,Yes,data/adni_nifti/067_S_0076/067_S_0076_MPRAGE_20051206112320_2.nii.gz
-I9362,067_S_0059,CN,F,71,sc,MRI,MPRAGE,Original,12/12/2005,DCM,Yes,data/adni_nifti/067_S_0059/067_S_0059_MPRAGE_20051212085328_3.nii.gz
-I8022,067_S_0029,AD,M,64,sc,MRI,MPRAGE,Original,10/14/2005,DCM,Yes,data/adni_nifti/067_S_0029/067_S_0029_MPRAGE_20051014080516_6.nii.gz
-I30171,062_S_1099,CN,F,79,sc,MRI,MPRAGE,Original,11/20/2006,DCM,Yes,data/adni_nifti/062_S_1099/062_S_1099_MPRAGE_20061120140509_3.nii.gz
-I26126,057_S_0934,CN,F,70,sc,MRI,MPRAGE,Original,10/04/2006,DCM,Yes,data/adni_nifti/057_S_0934/057_S_0934_MPRAGE_20061004134220_4.nii.gz
-I16692,035_S_0555,CN,M,77,sc,MRI,MPRAGE,Original,6/06/2006,DCM,Yes,data/adni_nifti/035_S_0555/035_S_0555_MPRAGE_20060606143137_2.nii.gz
-I25427,033_S_0923,CN,M,83,sc,MRI,MP-RAGE,Original,9/29/2006,DCM,Yes,data/adni_nifti/033_S_0923/033_S_0923_ADNI_12M4_TS_2_20060929094118_2.nii.gz
-I25013,033_S_0920,CN,F,80,sc,MRI,MP-RAGE,Original,9/22/2006,DCM,Yes,data/adni_nifti/033_S_0920/033_S_0920_ADNI_12M4_TS_2_20060922122119_2.nii.gz
-I24976,033_S_0888,AD,M,87,sc,MRI,MP-RAGE,Original,9/21/2006,DCM,Yes,data/adni_nifti/033_S_0888/033_S_0888_ADNI_12M4_TS_2_20060921103120_2.nii.gz
-I37350,029_S_1184,AD,F,65,sc,MRI,MP-RAGE,Original,1/22/2007,DCM,Yes,data/adni_nifti/029_S_1184/029_S_1184_ADNI_14M4_TS_2_20070122180351_2.nii.gz
-I24249,029_S_0845,CN,M,80,sc,MRI,MP-RAGE,Original,9/12/2006,DCM,Yes,data/adni_nifti/029_S_0845/029_S_0845_ADNI_11M4_BRM_20060912122245_2.nii.gz
-I27607,024_S_0985,CN,M,80,sc,MRI,MP-RAGE,Original,10/20/2006,DCM,Yes,data/adni_nifti/024_S_0985/024_S_0985_ADNI_7-19-06_3_20061020161550_3.nii.gz
-I39328,023_S_1262,AD,F,73,sc,MRI,MPRAGE,Original,2/09/2007,DCM,Yes,data/adni_nifti/023_S_1262/023_S_1262_MPRAGE_20070209082349_2.nii.gz
-I10238,023_S_0139,AD,F,66,sc,MRI,MPRAGE,Original,1/24/2006,DCM,Yes,data/adni_nifti/023_S_0139/023_S_0139_MPRAGE_20060124110148_2.nii.gz
-I12280,022_S_0219,AD,M,75,sc,MRI,MPRAGE,Original,3/17/2006,DCM,Yes,data/adni_nifti/022_S_0219/022_S_0219_MPRAGE_20060317133057_3.nii.gz
-I10252,022_S_0130,CN,M,73,sc,MRI,MPRAGE,Original,1/23/2006,DCM,Yes,data/adni_nifti/022_S_0130/022_S_0130_MPRAGE_20060123132212_2.nii.gz
-I25076,020_S_0899,CN,F,80,sc,MRI,MPRAGE,Original,9/25/2006,DCM,Yes,data/adni_nifti/020_S_0899/020_S_0899_MPRAGE_20060925193505_2.nii.gz
-I13175,016_S_0359,CN,F,81,sc,MRI,MPRAGE,Original,4/06/2006,DCM,Yes,data/adni_nifti/016_S_0359/016_S_0359_MPRAGE_20060406085241_3.nii.gz
-I12327,014_S_0328,AD,M,77,sc,MRI,MP-RAGE,Original,3/22/2006,DCM,Yes,data/adni_nifti/014_S_0328/014_S_0328_ADNI_11M4_BRM_20060322103447_3.nii.gz
-I15415,010_S_0419,CN,M,70,sc,MRI,ADNI       MPRAGE,Original,5/16/2006,DCM,Yes,data/adni_nifti/010_S_0419/010_S_0419_MPRAGE_SENSE_20060516143012_401.nii.gz
-I9093,010_S_0067,CN,M,75,sc,MRI,ADNI       MPRAGE,Original,11/30/2005,DCM,Yes,data/adni_nifti/010_S_0067/010_S_0067_MPRAGE_SENSE_20051130151358_301.nii.gz
-I9113,007_S_0068,CN,F,75,sc,MRI,MP-RAGE,Original,11/30/2005,DCM,Yes,data/adni_nifti/007_S_0068/007_S_0068_1.5T_ADNI_11M4_TS_8_hrb_20051130112659_2.nii.gz
-I23468,006_S_0731,CN,M,72,sc,MRI,MP-RAGE,Original,8/28/2006,DCM,Yes,data/adni_nifti/006_S_0731/006_S_0731_ADNI_12M4_TS_2_20060828104017_4.nii.gz
-I17377,006_S_0484,CN,M,71,sc,MRI,MP-RAGE,Original,6/21/2006,DCM,Yes,data/adni_nifti/006_S_0484/006_S_0484_ADNI_12M4_TS_2_20060621133610_3.nii.gz
-I25645,005_S_0929,AD,M,82,sc,MRI,MP-RAGE,Original,10/02/2006,DCM,Yes,data/adni_nifti/005_S_0929/005_S_0929_ADNI_12M4_TS.dat_2_20061002105938_2.nii.gz
-I11605,005_S_0221,AD,M,68,sc,MRI,MP-RAGE,Original,2/22/2006,DCM,Yes,data/adni_nifti/005_S_0221/005_S_0221_ADNI_12M4_TS.dat_2_20060222093951_5.nii.gz
+I37076,941_S_1197,CN,F,82,sc,MRI,MPRAGE,Original,1/20/2007,DCM,Yes,data/syn/syn_registered_941_S_1197_m12.nii.gz
+I14561,131_S_0457,AD,F,83,sc,MRI,MP-RAGE,Original,5/03/2006,DCM,Yes,data/syn/syn_registered_131_S_0457_m12.nii.gz
+I20543,129_S_0778,CN,M,73,sc,MRI,MP-RAGE,Original,8/14/2006,DCM,Yes,data/syn/syn_registered_129_S_0778_m12.nii.gz
+I16090,128_S_0545,CN,M,72,sc,MRI,MP-RAGE,Original,5/24/2006,DCM,Yes,data/syn/syn_registered_128_S_0545_m12.nii.gz
+I15556,128_S_0528,AD,F,71,sc,MRI,MP-RAGE,Original,5/17/2006,DCM,Yes,data/syn/syn_registered_128_S_0528_m12.nii.gz
+I12459,128_S_0229,CN,F,74,sc,MRI,MP-RAGE,Original,3/08/2006,DCM,Yes,data/syn/syn_registered_128_S_0229_m12.nii.gz
+I11203,128_S_0167,AD,M,76,sc,MRI,MP-RAGE,Original,2/16/2006,DCM,Yes,data/syn/syn_registered_128_S_0167_m12.nii.gz
+I23787,127_S_0754,AD,F,68,sc,MRI,MP-RAGE,Original,9/05/2006,DCM,Yes,data/syn/syn_registered_127_S_0754_m12.nii.gz
+I16911,127_S_0622,CN,F,75,sc,MRI,MP-RAGE,Original,6/13/2006,DCM,Yes,data/syn/syn_registered_127_S_0622_m12.nii.gz
+I17905,126_S_0680,CN,M,78,sc,MRI,SAG MP-RAGE,Original,7/05/2006,DCM,Yes,data/syn/syn_registered_126_S_0680_m12.nii.gz
+I11714,123_S_0113,CN,M,75,sc,MRI,ADNI       MPRAGE,Original,3/08/2006,DCM,Yes,data/syn/syn_registered_123_S_0113_m12.nii.gz
+I9648,123_S_0091,AD,M,62,sc,MRI,ADNI       MPRAGE,Original,12/23/2005,DCM,Yes,data/syn/syn_registered_123_S_0091_m12.nii.gz
+I9752,123_S_0072,CN,M,71,sc,MRI,ADNI       MPRAGE,Original,1/04/2006,DCM,Yes,data/syn/syn_registered_123_S_0072_m12.nii.gz
+I35266,109_S_1157,AD,F,85,sc,MRI,MPRAGE,Original,1/03/2007,DCM,Yes,data/syn/syn_registered_109_S_1157_m12.nii.gz
+I14952,099_S_0470,AD,F,87,sc,MRI,MPRAGE,Original,5/10/2006,DCM,Yes,data/syn/syn_registered_099_S_0470_m12.nii.gz
+I45794,082_S_1377,AD,M,83,sc,MRI,MPRAGE SAG,Original,3/20/2007,DCM,Yes,data/syn/syn_registered_082_S_1377_m12.nii.gz
+I9746,068_S_0109,AD,F,70,sc,MRI,ADNI       MPRAGE,Original,1/03/2006,DCM,Yes,data/syn/syn_registered_068_S_0109_m12.nii.gz
+I42887,067_S_1253,AD,F,63,sc,MRI,MPRAGE,Original,3/05/2007,DCM,Yes,data/syn/syn_registered_067_S_1253_m12.nii.gz
+I9287,067_S_0076,AD,M,78,sc,MRI,MPRAGE,Original,12/06/2005,DCM,Yes,data/syn/syn_registered_067_S_0076_m12.nii.gz
+I9362,067_S_0059,CN,F,71,sc,MRI,MPRAGE,Original,12/12/2005,DCM,Yes,data/syn/syn_registered_067_S_0059_m12.nii.gz
+I8022,067_S_0029,AD,M,64,sc,MRI,MPRAGE,Original,10/14/2005,DCM,Yes,data/syn/syn_registered_067_S_0029_m12.nii.gz
+I30171,062_S_1099,CN,F,79,sc,MRI,MPRAGE,Original,11/20/2006,DCM,Yes,data/syn/syn_registered_062_S_1099_m12.nii.gz
+I26126,057_S_0934,CN,F,70,sc,MRI,MPRAGE,Original,10/04/2006,DCM,Yes,data/syn/syn_registered_057_S_0934_m12.nii.gz
+I16692,035_S_0555,CN,M,77,sc,MRI,MPRAGE,Original,6/06/2006,DCM,Yes,data/syn/syn_registered_035_S_0555_m12.nii.gz
+I25427,033_S_0923,CN,M,83,sc,MRI,MP-RAGE,Original,9/29/2006,DCM,Yes,data/syn/syn_registered_033_S_0923_m12.nii.gz
+I25013,033_S_0920,CN,F,80,sc,MRI,MP-RAGE,Original,9/22/2006,DCM,Yes,data/syn/syn_registered_033_S_0920_m12.nii.gz
+I24976,033_S_0888,AD,M,87,sc,MRI,MP-RAGE,Original,9/21/2006,DCM,Yes,data/syn/syn_registered_033_S_0888_m12.nii.gz
+I37350,029_S_1184,AD,F,65,sc,MRI,MP-RAGE,Original,1/22/2007,DCM,Yes,data/syn/syn_registered_029_S_1184_m12.nii.gz
+I24249,029_S_0845,CN,M,80,sc,MRI,MP-RAGE,Original,9/12/2006,DCM,Yes,data/syn/syn_registered_029_S_0845_m12.nii.gz
+I27607,024_S_0985,CN,M,80,sc,MRI,MP-RAGE,Original,10/20/2006,DCM,Yes,data/syn/syn_registered_024_S_0985_m12.nii.gz
+I39328,023_S_1262,AD,F,73,sc,MRI,MPRAGE,Original,2/09/2007,DCM,Yes,data/syn/syn_registered_023_S_1262_m12.nii.gz
+I10238,023_S_0139,AD,F,66,sc,MRI,MPRAGE,Original,1/24/2006,DCM,Yes,data/syn/syn_registered_023_S_0139_m12.nii.gz
+I12280,022_S_0219,AD,M,75,sc,MRI,MPRAGE,Original,3/17/2006,DCM,Yes,data/syn/syn_registered_022_S_0219_m12.nii.gz
+I10252,022_S_0130,CN,M,73,sc,MRI,MPRAGE,Original,1/23/2006,DCM,Yes,data/syn/syn_registered_022_S_0130_m12.nii.gz
+I25076,020_S_0899,CN,F,80,sc,MRI,MPRAGE,Original,9/25/2006,DCM,Yes,data/syn/syn_registered_020_S_0899_m12.nii.gz
+I13175,016_S_0359,CN,F,81,sc,MRI,MPRAGE,Original,4/06/2006,DCM,Yes,data/syn/syn_registered_016_S_0359_m12.nii.gz
+I12327,014_S_0328,AD,M,77,sc,MRI,MP-RAGE,Original,3/22/2006,DCM,Yes,data/syn/syn_registered_014_S_0328_m12.nii.gz
+I15415,010_S_0419,CN,M,70,sc,MRI,ADNI       MPRAGE,Original,5/16/2006,DCM,Yes,data/syn/syn_registered_010_S_0419_m12.nii.gz
+I9093,010_S_0067,CN,M,75,sc,MRI,ADNI       MPRAGE,Original,11/30/2005,DCM,Yes,data/syn/syn_registered_010_S_0067_m12.nii.gz
+I9113,007_S_0068,CN,F,75,sc,MRI,MP-RAGE,Original,11/30/2005,DCM,Yes,data/syn/syn_registered_007_S_0068_m12.nii.gz
+I23468,006_S_0731,CN,M,72,sc,MRI,MP-RAGE,Original,8/28/2006,DCM,Yes,data/syn/syn_registered_006_S_0731_m12.nii.gz
+I17377,006_S_0484,CN,M,71,sc,MRI,MP-RAGE,Original,6/21/2006,DCM,Yes,data/syn/syn_registered_006_S_0484_m12.nii.gz
+I25645,005_S_0929,AD,M,82,sc,MRI,MP-RAGE,Original,10/02/2006,DCM,Yes,data/syn/syn_registered_005_S_0929_m12.nii.gz
+I11605,005_S_0221,AD,M,68,sc,MRI,MP-RAGE,Original,2/22/2006,DCM,Yes,data/syn/syn_registered_005_S_0221_m12.nii.gz
