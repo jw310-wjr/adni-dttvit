@@ -51,7 +51,6 @@ python run_all/train.py \
   --aug_deg 10 \
   --aug_translate 0.03 \
   --aug_noise 0.025 \
-  --aug_flip_prob 0.0 \
   --out_dir runs/vit2d_baseline \
   --amp
 

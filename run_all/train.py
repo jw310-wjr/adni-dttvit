@@ -145,18 +145,12 @@ def parse_args():
     p.add_argument(
         "--train_aug",
         action="store_true",
-        help="Training-only 2D augment (rotate/translate/noise; optional flip via --aug_flip_prob)",
+        help="Training-only 2D augment (rotate/translate/noise). L-R flip is not supported (brain L/R anatomy).",
     )
     p.add_argument("--aug_deg", type=float, default=12.0, help="Max |rotation| degrees for --train_aug")
     p.add_argument("--aug_translate", type=float, default=0.04,
                    help="Max shift as fraction of H,W for --train_aug")
     p.add_argument("--aug_noise", type=float, default=0.03, help="Gaussian noise std on normalized slice")
-    p.add_argument(
-        "--aug_flip_prob",
-        type=float,
-        default=0.0,
-        help="Prob of L-R flip (0 recommended unless you accept mirroring CN/AD labels)",
-    )
     p.add_argument("--seed", type=int, default=0)
 
     # output
@@ -701,7 +695,6 @@ def main():
             aug_deg=args.aug_deg,
             aug_translate=args.aug_translate,
             aug_noise=args.aug_noise,
-            aug_flip_prob=args.aug_flip_prob,
             **slice_cfg,
         )
         val_ds = Nii2DSliceDataset(val_csv, label_map=label_map, **slice_cfg)
@@ -842,7 +835,7 @@ def main():
         + (f" (eta_min={args.lr * args.lr_min_ratio:.2e})" if scheduler is not None else "")
         + " | "
         f"train_aug={args.train_aug} (deg={args.aug_deg}, translate={args.aug_translate}, "
-        f"noise={args.aug_noise}, flip_p={args.aug_flip_prob})"
+        f"noise={args.aug_noise}; no L-R flip)"
     )
     if args.tau is not None:
         print(f"Early-exit eval tau: {args.tau}")
@@ -1020,7 +1013,6 @@ def main():
         "aug_deg": args.aug_deg,
         "aug_translate": args.aug_translate,
         "aug_noise": args.aug_noise,
-        "aug_flip_prob": args.aug_flip_prob,
     }
     results_path = os.path.join(args.out_dir, "results.json")
     with open(results_path, "w") as f:

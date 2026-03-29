@@ -42,7 +42,7 @@ python run_all/run_teacher_student.py \
   --results_dir results \
   --skip_teacher \
   --amp \
-  --train_extra "--lr 2.5e-4 --weight_decay 0.09 --num_workers 4 --label_smoothing 0.035 --ce_class_weights auto --best_metric balanced_acc --early_stopping_patience 15 --early_stopping_min_delta 0.005 --lr_scheduler cosine --drop_path_rate 0.1 --train_aug --aug_deg 10 --aug_translate 0.03 --aug_noise 0.025 --aug_flip_prob 0.0"
+  --train_extra "--lr 2.5e-4 --weight_decay 0.09 --num_workers 4 --label_smoothing 0.035 --ce_class_weights auto --best_metric balanced_acc --early_stopping_patience 15 --early_stopping_min_delta 0.005 --lr_scheduler cosine --drop_path_rate 0.1 --train_aug --aug_deg 10 --aug_translate 0.03 --aug_noise 0.025"
 
 echo "=== DONE ==="
 date

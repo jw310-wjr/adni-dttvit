@@ -47,11 +47,13 @@ def apply_mri_slice_augment(
     deg: float = 12.0,
     translate_frac: float = 0.04,
     noise_std: float = 0.03,
-    flip_prob: float = 0.0,
 ) -> torch.Tensor:
     """
     Light 2D augment on normalized slice tensor [1, H, W] (train only).
     Uses torchvision if available; otherwise only Gaussian noise when noise_std > 0.
+
+    No left-right flip: axial brain MRI is L/R asymmetric in MNI/orientation; mirroring
+    swaps hemispheres and must not be used for anatomy-sensitive AD vs CN.
     """
     try:
         import torchvision.transforms.functional as TF
@@ -60,8 +62,6 @@ def apply_mri_slice_augment(
             x = x + torch.randn_like(x) * noise_std
         return x
 
-    if flip_prob > 0.0 and float(torch.rand(1, device=x.device)) < flip_prob:
-        x = torch.flip(x, [2])
     if deg > 0.0:
         angle = float(torch.empty(1, device=x.device).uniform_(-deg, deg))
         x = TF.rotate(
@@ -140,7 +140,6 @@ class Nii2DSliceDataset(Dataset):
         aug_deg: float = 12.0,
         aug_translate: float = 0.04,
         aug_noise: float = 0.03,
-        aug_flip_prob: float = 0.0,
         **selector_kwargs,
     ):
         self.df = pd.read_csv(csv_path)
@@ -151,7 +150,6 @@ class Nii2DSliceDataset(Dataset):
         self.aug_deg = aug_deg
         self.aug_translate = aug_translate
         self.aug_noise = aug_noise
-        self.aug_flip_prob = aug_flip_prob
 
         # column fallback for common manifest formats (Group/label, Subject/subject)
         self.cfg.image_col = _resolve_col(self.df, self.cfg.image_col, ["nifti_path", "path"])
@@ -206,7 +204,6 @@ class Nii2DSliceDataset(Dataset):
                 deg=self.aug_deg,
                 translate_frac=self.aug_translate,
                 noise_std=self.aug_noise,
-                flip_prob=self.aug_flip_prob,
             )
         y = self._get_label(row)
 
