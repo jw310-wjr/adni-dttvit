@@ -18,7 +18,9 @@ mkdir -p runs/logs results
 |--------|-----|------|-------------|
 | `baseline.sbatch` | vit2d_baseline | 12h | Full ViT baseline, single-slice fixed z |
 | `baseline_25d.sbatch` | vit2d_baseline_25d | 12h | Same protocol as baseline, 2.5D `stack3`/`stack5` (env `Z_INDEX`, `SLICE_STACK_MODE`) |
-| `baseline_25d_array_z.sbatch` | vit2d_25d_z | 12h | **Array** `z ∈ {77,115,127,144}` in parallel (one GPU each); optional `SLICE_STACK_MODE` |
+| `baseline_25d_array_z.sbatch` | vit2d_25d_z | 12h | **Array** `z ∈ {77,115,127,144}`, **stack3** (optional `SLICE_STACK_MODE`) |
+| `baseline_25d_stack5.sbatch` | vit2d_baseline_25d5 | 12h | **5 slices** `[z-2..z+2]`, `in_chans=5`; env `Z_INDEX` (default 144) |
+| `baseline_25d_array_z_stack5.sbatch` | vit2d_25d5_z | 12h | **Array** same z set, **stack5** → `runs/vit2d_baseline_stack5_z*` |
 | `slice_selection.sbatch` | slice_sel | 24h | Find best z (19,48,77,115,144,173) |
 | `compare_thin_methods.sbatch` | thin_compare | 48h | Baseline + DTT+EE (l2, attn, random) |
 | `dtt_ee.sbatch` | vit2d_dtt_ee | 12h | Single DTT+EE run (default attn) |
@@ -41,9 +43,12 @@ sbatch slurm/active/baseline.sbatch
 # Z_INDEX=127 SLICE_STACK_MODE=stack3 sbatch slurm/active/baseline_25d.sbatch
 sbatch slurm/active/baseline_25d.sbatch
 
-# 2.5D for z in 77,115,127,144 at once (4 GPUs if scheduler allows)
-# SLICE_STACK_MODE=stack5 sbatch slurm/active/baseline_25d_array_z.sbatch
+# 2.5D stack3: z in 77,115,127,144 at once (4 GPUs if scheduler allows)
 sbatch slurm/active/baseline_25d_array_z.sbatch
+
+# 2.5D **5 slices** same z grid -> runs/vit2d_baseline_stack5_z77, ..._z144
+sbatch slurm/active/baseline_25d_array_z_stack5.sbatch
+# Z_INDEX=115 sbatch slurm/active/baseline_25d_stack5.sbatch
 
 # Slice selection (find best z)
 sbatch slurm/active/slice_selection.sbatch
