@@ -18,6 +18,7 @@ mkdir -p runs/logs results
 |--------|-----|------|-------------|
 | `baseline.sbatch` | vit2d_baseline | 12h | Full ViT baseline, single-slice fixed z |
 | `baseline_25d.sbatch` | vit2d_baseline_25d | 12h | Same protocol as baseline, 2.5D `stack3`/`stack5` (env `Z_INDEX`, `SLICE_STACK_MODE`) |
+| `baseline_25d_array_z.sbatch` | vit2d_25d_z | 12h | **Array** `z ∈ {77,115,127,144}` in parallel (one GPU each); optional `SLICE_STACK_MODE` |
 | `slice_selection.sbatch` | slice_sel | 24h | Find best z (19,48,77,115,144,173) |
 | `compare_thin_methods.sbatch` | thin_compare | 48h | Baseline + DTT+EE (l2, attn, random) |
 | `dtt_ee.sbatch` | vit2d_dtt_ee | 12h | Single DTT+EE run (default attn) |
@@ -39,6 +40,10 @@ sbatch slurm/active/baseline.sbatch
 # 2.5D baseline (default stack3, z=144; override e.g. Z_INDEX=127)
 # Z_INDEX=127 SLICE_STACK_MODE=stack3 sbatch slurm/active/baseline_25d.sbatch
 sbatch slurm/active/baseline_25d.sbatch
+
+# 2.5D for z in 77,115,127,144 at once (4 GPUs if scheduler allows)
+# SLICE_STACK_MODE=stack5 sbatch slurm/active/baseline_25d_array_z.sbatch
+sbatch slurm/active/baseline_25d_array_z.sbatch
 
 # Slice selection (find best z)
 sbatch slurm/active/slice_selection.sbatch
