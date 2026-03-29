@@ -8,13 +8,14 @@ if PROJECT_ROOT not in sys.path:
 
 import csv
 import json
+import math
 import time
 from typing import List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from src.data.dataset_nii2d import Nii2DSliceDataset
 from src.data.dataset_npy2d import ADNINPY2DDataset
@@ -103,8 +104,8 @@ def parse_args():
     p.add_argument(
         "--best_metric",
         default="balanced_acc",
-        choices=["acc", "balanced_acc", "loss"],
-        help="Validation metric for best.pt and early stopping (loss=minimize CE on val)",
+        choices=["acc", "balanced_acc", "loss", "hmean"],
+        help="hmean: harmonic mean(val_acc, val_balanced)—high acc without single-class collapse",
     )
     p.add_argument(
         "--early_stopping_patience",
@@ -129,6 +130,18 @@ def parse_args():
         type=float,
         default=0.05,
         help="eta_min = lr * lr_min_ratio when lr_scheduler=cosine",
+    )
+    p.add_argument(
+        "--warmup_epochs",
+        type=int,
+        default=0,
+        help="Linear LR warmup (0=off). Used before cosine decay when lr_scheduler=cosine.",
+    )
+    p.add_argument(
+        "--train_sampler",
+        default="shuffle",
+        choices=["shuffle", "balanced"],
+        help="balanced: WeightedRandomSampler (inverse freq per sample) for CN/AD mix each epoch",
     )
     p.add_argument(
         "--drop_path_rate",
@@ -338,6 +351,57 @@ def ce_class_weight_tensor(
     w = [n / (num_classes * c) for c in counts]
     t = torch.tensor(w, dtype=torch.float32, device=device)
     return t, counts
+
+
+def per_sample_inv_freq_weights(train_csv: str, label_map: dict, num_classes: int) -> List[float]:
+    """One weight per training row (CSV order = Dataset idx): 1 / count[class]."""
+    label_col = None
+    ys: List[int] = []
+    with open(train_csv, newline="") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or []
+        for c in ("label", "Group", "group"):
+            if c in fields:
+                label_col = c
+                break
+        if label_col is None:
+            raise ValueError(f"No label column in {train_csv}")
+        for row in reader:
+            y = int(label_map[str(row[label_col].strip())])
+            ys.append(y)
+    counts = [0] * num_classes
+    for y in ys:
+        counts[y] += 1
+    if any(c == 0 for c in counts):
+        raise ValueError(f"Missing class in {train_csv}: counts={counts}")
+    return [1.0 / counts[y] for y in ys]
+
+
+def set_epoch_lr(optimizer: optim.Optimizer, epoch: int, args) -> float:
+    """Linear warmup then cosine decay to eta_min (when lr_scheduler=cosine)."""
+    base = args.lr
+    eta = max(1e-8, float(base * args.lr_min_ratio))
+    if args.lr_scheduler == "none":
+        lr = base
+    else:
+        w = max(0, int(args.warmup_epochs))
+        if w > 0 and epoch < w:
+            lr = base * float(epoch + 1) / float(w)
+        else:
+            denom = max(1, int(args.epochs) - w)
+            t = (epoch - w) / float(denom)
+            t = min(1.0, max(0.0, t))
+            lr = eta + (base - eta) * 0.5 * (1.0 + math.cos(math.pi * t))
+    for g in optimizer.param_groups:
+        g["lr"] = lr
+    return float(lr)
+
+
+def val_hmean_acc_balanced(val_acc: float, val_balanced: float, eps: float = 1e-8) -> float:
+    a, b = float(val_acc), float(val_balanced)
+    if a <= eps or b <= eps:
+        return 0.0
+    return 2.0 * a * b / (a + b)
 
 
 def set_seed(seed: int):
@@ -700,13 +764,37 @@ def main():
         val_ds = Nii2DSliceDataset(val_csv, label_map=label_map, **slice_cfg)
         test_ds = Nii2DSliceDataset(test_csv, label_map=label_map, **slice_cfg)
 
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda"),
-    )
+    train_sampler = None
+    if args.train_sampler == "balanced":
+        psw = per_sample_inv_freq_weights(train_csv, label_map, num_classes)
+        if len(psw) != len(train_ds):
+            raise RuntimeError(
+                f"Sampler length {len(psw)} != train_ds {len(train_ds)} (check train.csv rows)"
+            )
+        train_sampler = WeightedRandomSampler(
+            weights=torch.as_tensor(psw, dtype=torch.double),
+            num_samples=len(psw),
+            replacement=True,
+            generator=torch.Generator().manual_seed(args.seed),
+        )
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=args.batch_size,
+            shuffle=False,
+            sampler=train_sampler,
+            num_workers=args.num_workers,
+            pin_memory=(device.type == "cuda"),
+        )
+        print(f"Train sampler: balanced (WeightedRandomSampler, n={len(psw)})")
+    else:
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=args.num_workers,
+            pin_memory=(device.type == "cuda"),
+        )
+        print("Train sampler: shuffle")
     val_loader = DataLoader(
         val_ds,
         batch_size=args.batch_size,
@@ -785,13 +873,6 @@ def main():
         label_smoothing=args.label_smoothing,
     )
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = None
-    if args.lr_scheduler == "cosine":
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=max(1, args.epochs),
-            eta_min=max(1e-8, args.lr * args.lr_min_ratio),
-        )
 
     use_amp = args.amp and (device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
@@ -831,9 +912,9 @@ def main():
         f"| drop_path_rate={args.drop_path_rate} drop_rate={args.drop_rate} "
         f"| ce_class_weights={args.ce_class_weights} | best_metric={args.best_metric} "
         f"| early_stop: patience={args.early_stopping_patience} min_delta={args.early_stopping_min_delta} | "
-        f"lr_scheduler={args.lr_scheduler}"
-        + (f" (eta_min={args.lr * args.lr_min_ratio:.2e})" if scheduler is not None else "")
-        + " | "
+        f"lr_scheduler={args.lr_scheduler} warmup_epochs={args.warmup_epochs} "
+        f"(eta_min={args.lr * args.lr_min_ratio:.2e}) | "
+        f"train_sampler={args.train_sampler} | "
         f"train_aug={args.train_aug} (deg={args.aug_deg}, translate={args.aug_translate}, "
         f"noise={args.aug_noise}; no L-R flip)"
     )
@@ -846,6 +927,7 @@ def main():
 
     for ep in range(args.epochs):
         t0 = time.time()
+        set_epoch_lr(optimizer, ep, args)
         if use_distill:
             train_loss, train_acc, train_balanced = train_one_epoch_distill(
                 model,
@@ -901,6 +983,8 @@ def main():
             track_now = val_acc
         elif args.best_metric == "balanced_acc":
             track_now = val_balanced
+        elif args.best_metric == "hmean":
+            track_now = val_hmean_acc_balanced(val_acc, val_balanced)
         else:
             track_now = -float(val_loss)
 
@@ -921,22 +1005,22 @@ def main():
 
         dt = time.time() - t0
         lr_cur = optimizer.param_groups[0]["lr"]
+        val_hm = val_hmean_acc_balanced(val_acc, val_balanced)
         if args.tau is None:
             print(
                 f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} train_balanced={train_balanced:.4f} "
-                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
+                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_hmean={val_hm:.4f} "
+                f"val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
             )
         else:
             print(
                 f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} train_balanced={train_balanced:.4f} "
-                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
+                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_hmean={val_hm:.4f} "
+                f"val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
             )
         append_log(
             log_path, ep, train_loss, train_acc, train_balanced, val_acc, val_balanced, val_loss
         )
-
-        if scheduler is not None:
-            scheduler.step()
 
         if args.early_stopping_patience > 0 and patience_ctr >= args.early_stopping_patience:
             print(
@@ -975,6 +1059,7 @@ def main():
     results = {
         "best_val_acc": best_val_acc,
         "best_val_balanced": best_val_balanced,
+        "best_val_hmean": val_hmean_acc_balanced(best_val_acc, best_val_balanced),
         "best_val_loss": best_val_loss,
         "best_metric": args.best_metric,
         "test_acc": test_acc,
@@ -1007,6 +1092,8 @@ def main():
         "early_stopping_min_delta": args.early_stopping_min_delta,
         "lr_scheduler": args.lr_scheduler,
         "lr_min_ratio": args.lr_min_ratio,
+        "warmup_epochs": args.warmup_epochs,
+        "train_sampler": args.train_sampler,
         "drop_path_rate": args.drop_path_rate,
         "drop_rate": args.drop_rate,
         "train_aug": args.train_aug,

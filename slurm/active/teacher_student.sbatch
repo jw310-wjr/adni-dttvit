@@ -30,7 +30,7 @@ Z_INDEX="${Z_INDEX:-144}"
 python run_all/run_teacher_student.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
-  --epochs 50 \
+  --epochs 60 \
   --batch_size 8 \
   --z_index "${Z_INDEX}" \
   --teacher_out runs/teacher \
@@ -39,7 +39,7 @@ python run_all/run_teacher_student.py \
   --distill_alpha 0.5 \
   --results_dir results \
   --amp \
-  --train_extra "--lr 2.5e-4 --weight_decay 0.09 --num_workers 4 --label_smoothing 0.035 --ce_class_weights auto --best_metric balanced_acc --early_stopping_patience 15 --early_stopping_min_delta 0.005 --lr_scheduler cosine --drop_path_rate 0.1 --train_aug --aug_deg 10 --aug_translate 0.03 --aug_noise 0.025"
+  --train_extra "--lr 3e-4 --weight_decay 0.085 --num_workers 4 --label_smoothing 0.03 --ce_class_weights auto --best_metric hmean --early_stopping_patience 18 --early_stopping_min_delta 0.004 --lr_scheduler cosine --warmup_epochs 5 --lr_min_ratio 0.06 --train_sampler balanced --drop_path_rate 0.08 --train_aug --aug_deg 10 --aug_translate 0.03 --aug_noise 0.025"
 
 echo "=== DONE ==="
 date
