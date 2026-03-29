@@ -41,6 +41,56 @@ def normalize_2d(
     return img
 
 
+def apply_mri_slice_augment(
+    x: torch.Tensor,
+    *,
+    deg: float = 12.0,
+    translate_frac: float = 0.04,
+    noise_std: float = 0.03,
+    flip_prob: float = 0.0,
+) -> torch.Tensor:
+    """
+    Light 2D augment on normalized slice tensor [1, H, W] (train only).
+    Uses torchvision if available; otherwise only Gaussian noise when noise_std > 0.
+    """
+    try:
+        import torchvision.transforms.functional as TF
+    except ImportError:
+        if noise_std > 0:
+            x = x + torch.randn_like(x) * noise_std
+        return x
+
+    if flip_prob > 0.0 and float(torch.rand(1, device=x.device)) < flip_prob:
+        x = torch.flip(x, [2])
+    if deg > 0.0:
+        angle = float(torch.empty(1, device=x.device).uniform_(-deg, deg))
+        x = TF.rotate(
+            x,
+            angle,
+            interpolation=TF.InterpolationMode.BILINEAR,
+            fill=[0.0],
+        )
+    if translate_frac > 0.0:
+        _, h, w = x.shape
+        max_tx = max(1, int(translate_frac * w))
+        max_ty = max(1, int(translate_frac * h))
+        tx = int(torch.randint(-max_tx, max_tx + 1, (1,), device=x.device).item())
+        ty = int(torch.randint(-max_ty, max_ty + 1, (1,), device=x.device).item())
+        if tx != 0 or ty != 0:
+            x = TF.affine(
+                x,
+                angle=0.0,
+                translate=[tx, ty],
+                scale=1.0,
+                shear=[0.0],
+                fill=[0.0],
+                interpolation=TF.InterpolationMode.BILINEAR,
+            )
+    if noise_std > 0.0:
+        x = x + torch.randn_like(x) * noise_std
+    return x
+
+
 def to_3ch_resize(img: np.ndarray, out_size: int = 224) -> torch.Tensor:
     """Resize to out_size; returns (1,H,W) for ViT in_chans=1 (grayscale MRI)."""
     t = torch.from_numpy(img).float().unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
@@ -86,12 +136,22 @@ class Nii2DSliceDataset(Dataset):
         label_map: Optional[Dict[str, int]] = None,
         data_root: str = ".",
         slice_selector: Optional[str] = None,
+        augment: bool = False,
+        aug_deg: float = 12.0,
+        aug_translate: float = 0.04,
+        aug_noise: float = 0.03,
+        aug_flip_prob: float = 0.0,
         **selector_kwargs,
     ):
         self.df = pd.read_csv(csv_path)
         self.cfg = cfg or Nii2DConfig()
         self.data_root = data_root
         self.label_map = label_map
+        self.augment = augment
+        self.aug_deg = aug_deg
+        self.aug_translate = aug_translate
+        self.aug_noise = aug_noise
+        self.aug_flip_prob = aug_flip_prob
 
         # column fallback for common manifest formats (Group/label, Subject/subject)
         self.cfg.image_col = _resolve_col(self.df, self.cfg.image_col, ["nifti_path", "path"])
@@ -140,6 +200,14 @@ class Nii2DSliceDataset(Dataset):
 
         img2d = normalize_2d(img2d)
         x = to_3ch_resize(img2d, self.cfg.out_size)
+        if self.augment:
+            x = apply_mri_slice_augment(
+                x,
+                deg=self.aug_deg,
+                translate_frac=self.aug_translate,
+                noise_std=self.aug_noise,
+                flip_prob=self.aug_flip_prob,
+            )
         y = self._get_label(row)
 
         if self.cfg.return_meta:

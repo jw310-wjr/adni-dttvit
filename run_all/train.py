@@ -82,6 +82,27 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--weight_decay", type=float, default=0.05)
+    p.add_argument(
+        "--label_smoothing",
+        type=float,
+        default=0.0,
+        help="CrossEntropyLoss label smoothing (0=no smoothing; try 0.05–0.1)",
+    )
+    p.add_argument(
+        "--train_aug",
+        action="store_true",
+        help="Training-only 2D augment (rotate/translate/noise; optional flip via --aug_flip_prob)",
+    )
+    p.add_argument("--aug_deg", type=float, default=12.0, help="Max |rotation| degrees for --train_aug")
+    p.add_argument("--aug_translate", type=float, default=0.04,
+                   help="Max shift as fraction of H,W for --train_aug")
+    p.add_argument("--aug_noise", type=float, default=0.03, help="Gaussian noise std on normalized slice")
+    p.add_argument(
+        "--aug_flip_prob",
+        type=float,
+        default=0.0,
+        help="Prob of L-R flip (0 recommended unless you accept mirroring CN/AD labels)",
+    )
     p.add_argument("--seed", type=int, default=0)
 
     # output
@@ -512,9 +533,18 @@ def main():
                 slice_cfg["z_frac"] = args.z_frac
             else:
                 slice_cfg["z_index"] = args.z_index  # default 77 (middle)
-        train_ds = Nii2DSliceDataset(train_csv, label_map=label_map, **slice_cfg)
-        val_ds   = Nii2DSliceDataset(val_csv,   label_map=label_map, **slice_cfg)
-        test_ds  = Nii2DSliceDataset(test_csv,  label_map=label_map, **slice_cfg)
+        train_ds = Nii2DSliceDataset(
+            train_csv,
+            label_map=label_map,
+            augment=args.train_aug,
+            aug_deg=args.aug_deg,
+            aug_translate=args.aug_translate,
+            aug_noise=args.aug_noise,
+            aug_flip_prob=args.aug_flip_prob,
+            **slice_cfg,
+        )
+        val_ds = Nii2DSliceDataset(val_csv, label_map=label_map, **slice_cfg)
+        test_ds = Nii2DSliceDataset(test_csv, label_map=label_map, **slice_cfg)
 
     train_loader = DataLoader(
         train_ds,
@@ -582,7 +612,7 @@ def main():
 
     print(f"ViT depth (num blocks): {depth}")
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     use_amp = args.amp and (device.type == "cuda")
@@ -613,6 +643,11 @@ def main():
     print(
         f"Early-exit (model): {getattr(model, 'enable_early_exit', False)} "
         f"| alpha={args.alpha} beta={args.beta}"
+    )
+    print(
+        f"Regularization: weight_decay={args.weight_decay} label_smoothing={args.label_smoothing} | "
+        f"train_aug={args.train_aug} (deg={args.aug_deg}, translate={args.aug_translate}, "
+        f"noise={args.aug_noise}, flip_p={args.aug_flip_prob})"
     )
     if args.tau is not None:
         print(f"Early-exit eval tau: {args.tau}")
@@ -708,6 +743,15 @@ def main():
         "distill_temp": args.distill_temp,
         "distill_alpha": args.distill_alpha,
         "lambda_feat": args.lambda_feat,
+        "lr": args.lr,
+        "weight_decay": args.weight_decay,
+        "epochs": args.epochs,
+        "label_smoothing": args.label_smoothing,
+        "train_aug": args.train_aug,
+        "aug_deg": args.aug_deg,
+        "aug_translate": args.aug_translate,
+        "aug_noise": args.aug_noise,
+        "aug_flip_prob": args.aug_flip_prob,
     }
     results_path = os.path.join(args.out_dir, "results.json")
     with open(results_path, "w") as f:
