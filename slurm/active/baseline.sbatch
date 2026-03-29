@@ -8,7 +8,7 @@
 #SBATCH -o /scratch/jw310/adni-dttvit/runs/logs/baseline_%j.out
 #SBATCH -e /scratch/jw310/adni-dttvit/runs/logs/baseline_%j.err
 
-# Protocol: train_aug + label_smoothing + weight_decay 0.15 (requires torchvision).
+# Protocol: train_aug + label_smoothing 0.05 + weight_decay 0.12, 50 epochs (requires torchvision).
 
 set -euo pipefail
 
@@ -36,12 +36,12 @@ python run_all/train.py \
   --data_root ${PROJECT} \
   --slice_selector fixed \
   --z_index "${Z_INDEX}" \
-  --epochs 30 \
+  --epochs 50 \
   --batch_size 8 \
   --num_workers 4 \
   --lr 1e-4 \
-  --weight_decay 0.15 \
-  --label_smoothing 0.08 \
+  --weight_decay 0.12 \
+  --label_smoothing 0.05 \
   --train_aug \
   --aug_deg 12 \
   --aug_translate 0.04 \

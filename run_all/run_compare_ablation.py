@@ -25,7 +25,7 @@ def parse_args():
     p.add_argument("--data_root", default=".")
     p.add_argument("--out_base", default="runs/compare_ablation")
     p.add_argument("--results_dir", default="results")
-    p.add_argument("--epochs", type=int, default=30)
+    p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--thin_method", default="attn", choices=["l2", "attn", "random", "learnable"],
                    help="DTT method: l2/attn/random (heuristic) or learnable (ScoreHead)")

@@ -26,7 +26,7 @@ def parse_args():
     p.add_argument("--data_root", default=".")
     p.add_argument("--out_base", default="runs/compare_dtt_only")
     p.add_argument("--results_dir", default="results")
-    p.add_argument("--epochs", type=int, default=30)
+    p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--methods", nargs="+", default=["l2", "attn", "random", "learnable"],
                    help="DTT methods (learnable = Proposal §3.3 ScoreHead)")

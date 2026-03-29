@@ -36,11 +36,11 @@ python run_all/run_compare_ablation.py \
   --data_root ${PROJECT} \
   --out_base runs/compare_ablation \
   --results_dir results \
-  --epochs 30 \
+  --epochs 50 \
   --batch_size 8 \
   --z_index "${Z_INDEX}" \
   --thin_method attn \
-  --train_extra "--amp --lr 1e-4 --weight_decay 0.15 --num_workers 4 --label_smoothing 0.08 --train_aug --aug_deg 12 --aug_translate 0.04 --aug_noise 0.03 --aug_flip_prob 0.0"
+  --train_extra "--amp --lr 1e-4 --weight_decay 0.12 --num_workers 4 --label_smoothing 0.05 --train_aug --aug_deg 12 --aug_translate 0.04 --aug_noise 0.03 --aug_flip_prob 0.0"
 
 echo "=== DONE ==="
 date
