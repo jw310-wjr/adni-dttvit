@@ -16,7 +16,8 @@ mkdir -p runs/logs results
 
 | Script | Job | Time | Description |
 |--------|-----|------|-------------|
-| `baseline.sbatch` | vit2d_baseline | 12h | Full ViT baseline, fixed z=77 |
+| `baseline.sbatch` | vit2d_baseline | 12h | Full ViT baseline, single-slice fixed z |
+| `baseline_25d.sbatch` | vit2d_baseline_25d | 12h | Same protocol as baseline, 2.5D `stack3`/`stack5` (env `Z_INDEX`, `SLICE_STACK_MODE`) |
 | `slice_selection.sbatch` | slice_sel | 24h | Find best z (19,48,77,115,144,173) |
 | `compare_thin_methods.sbatch` | thin_compare | 48h | Baseline + DTT+EE (l2, attn, random) |
 | `dtt_ee.sbatch` | vit2d_dtt_ee | 12h | Single DTT+EE run (default attn) |
@@ -34,6 +35,10 @@ cd /scratch/jw310/adni-dttvit
 
 # Baseline
 sbatch slurm/active/baseline.sbatch
+
+# 2.5D baseline (default stack3, z=144; override e.g. Z_INDEX=127)
+# Z_INDEX=127 SLICE_STACK_MODE=stack3 sbatch slurm/active/baseline_25d.sbatch
+sbatch slurm/active/baseline_25d.sbatch
 
 # Slice selection (find best z)
 sbatch slurm/active/slice_selection.sbatch
