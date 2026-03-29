@@ -8,8 +8,7 @@
 #SBATCH -o /scratch/jw310/adni-dttvit/runs/logs/baseline_aug_%j.out
 #SBATCH -e /scratch/jw310/adni-dttvit/runs/logs/baseline_aug_%j.err
 
-# Baseline + train-time 2D augment + label smoothing + slightly stronger weight decay.
-# Requires: pip install torchvision (see requirements.txt).
+# Same balanced protocol as baseline.sbatch; alternate out_dir. Requires torchvision.
 
 set -euo pipefail
 
@@ -17,7 +16,7 @@ PROJECT=/scratch/jw310/adni-dttvit
 VENV=/scratch/jw310/venvs/torch_fix/bin/activate
 
 Z_INDEX="${Z_INDEX:-144}"
-echo "=== ViT2D Baseline (augment + reg, z=${Z_INDEX}) ==="
+echo "=== ViT2D Baseline (balanced, z=${Z_INDEX}) -> vit2d_baseline_aug ==="
 hostname
 date
 echo
@@ -38,13 +37,16 @@ python run_all/train.py \
   --epochs 50 \
   --batch_size 8 \
   --num_workers 4 \
-  --lr 3e-4 \
-  --weight_decay 0.08 \
-  --label_smoothing 0 \
+  --lr 2.5e-4 \
+  --weight_decay 0.09 \
+  --label_smoothing 0.035 \
+  --ce_class_weights auto \
+  --best_metric balanced_acc \
+  --early_stopping_patience 15 \
   --train_aug \
-  --aug_deg 8 \
-  --aug_translate 0.025 \
-  --aug_noise 0.02 \
+  --aug_deg 10 \
+  --aug_translate 0.03 \
+  --aug_noise 0.025 \
   --aug_flip_prob 0.0 \
   --out_dir runs/vit2d_baseline_aug \
   --amp

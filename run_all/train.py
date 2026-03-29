@@ -9,6 +9,7 @@ if PROJECT_ROOT not in sys.path:
 import csv
 import json
 import time
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -80,13 +81,36 @@ def parse_args():
     p.add_argument("--epochs", type=int, default=50, help="Default 50, aligned with SLURM baseline config")
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--num_workers", type=int, default=2)
-    p.add_argument("--lr", type=float, default=3e-4)
-    p.add_argument("--weight_decay", type=float, default=0.05)
+    p.add_argument("--lr", type=float, default=2.5e-4, help="Default mid between 1e-4 and 3e-4 for stability + learning")
+    p.add_argument(
+        "--weight_decay",
+        type=float,
+        default=0.09,
+        help="AdamW L2; ~0.08–0.10 balances under/over-fit for this setup",
+    )
     p.add_argument(
         "--label_smoothing",
         type=float,
-        default=0.0,
-        help="CrossEntropyLoss label smoothing (0=no smoothing; try 0.05–0.1)",
+        default=0.035,
+        help="Mild CE smoothing (0=off; too high + strong WD tends to underfit)",
+    )
+    p.add_argument(
+        "--ce_class_weights",
+        default="auto",
+        choices=["auto", "none"],
+        help="auto: sklearn-style inverse frequency from train.csv (reduces majority-class collapse)",
+    )
+    p.add_argument(
+        "--best_metric",
+        default="balanced_acc",
+        choices=["acc", "balanced_acc", "loss"],
+        help="Validation metric for best.pt and early stopping (loss=minimize CE on val)",
+    )
+    p.add_argument(
+        "--early_stopping_patience",
+        type=int,
+        default=0,
+        help="Stop after this many epochs without best_metric improvement (0=run all epochs)",
     )
     p.add_argument(
         "--train_aug",
@@ -256,6 +280,42 @@ def parse_label_map(s: str):
     return {k: int(v) for k, v in (x.split("=") for x in s.split(","))}
 
 
+def train_class_counts_from_csv(train_csv: str, label_map: dict, num_classes: int) -> Tuple[List[int], int]:
+    label_col = None
+    with open(train_csv, newline="") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or []
+        for c in ("label", "Group", "group"):
+            if c in fields:
+                label_col = c
+                break
+        if label_col is None:
+            raise ValueError(f"No label column (label/Group/group) in {train_csv}")
+        counts = [0] * num_classes
+        n = 0
+        for row in reader:
+            y = int(label_map[str(row[label_col].strip())])
+            counts[y] += 1
+            n += 1
+    if n == 0:
+        raise ValueError(f"Empty training CSV: {train_csv}")
+    if any(c == 0 for c in counts):
+        raise ValueError(f"Missing some classes in {train_csv}: counts={counts}")
+    return counts, n
+
+
+def ce_class_weight_tensor(
+    train_csv: str,
+    label_map: dict,
+    num_classes: int,
+    device: torch.device,
+) -> Tuple[torch.Tensor, List[int]]:
+    counts, n = train_class_counts_from_csv(train_csv, label_map, num_classes)
+    w = [n / (num_classes * c) for c in counts]
+    t = torch.tensor(w, dtype=torch.float32, device=device)
+    return t, counts
+
+
 def set_seed(seed: int):
     import random
     import numpy as np
@@ -270,19 +330,30 @@ def get_device():
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, tau=None, tau_u=None, criterion=None):
+def evaluate(
+    model,
+    loader,
+    device,
+    tau=None,
+    tau_u=None,
+    criterion=None,
+    num_classes: int = 2,
+):
     """
     If tau is set: uncertainty-guided early exit (Proposal §3.6) with tau, tau_u.
     If criterion is set: also returns val_loss for logging.
+    When tau is None: returns balanced_acc (mean per-class recall) over the split.
     """
     model.eval()
     correct = 0
     total = 0
     total_loss = 0.0
     exit_counts = {1: 0, 2: 0, 3: 0} if tau is not None else None
+    class_correct = [0] * num_classes
+    class_total = [0] * num_classes
 
     for x, y in loader:
-        x, y = x.to(device), y.to(device)
+        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
 
         if tau is None:
             logits = (model.forward_all(x)[2] if hasattr(model, "forward_all") else model(x))
@@ -299,17 +370,31 @@ def evaluate(model, loader, device, tau=None, tau_u=None, criterion=None):
 
         correct += (pred == y).sum().item()
         total += y.numel()
+        for c in range(num_classes):
+            m = y == c
+            class_total[c] += int(m.sum().item())
+            class_correct[c] += int(((pred == y) & m).sum().item())
         if criterion is not None:
             total_loss += criterion(logits, y).item()
 
     acc = correct / max(total, 1)
+    if sum(class_total) > 0:
+        ncls = sum(1 for c in range(num_classes) if class_total[c] > 0)
+        balanced_acc = float(
+            sum(class_correct[c] / class_total[c] for c in range(num_classes) if class_total[c] > 0)
+            / max(1, ncls)
+        )
+    else:
+        balanced_acc = 0.0
     val_loss = total_loss / max(len(loader), 1) if criterion is not None else None
     if tau is not None:
         avg_exit = (1 * exit_counts[1] + 2 * exit_counts[2] + 3 * exit_counts[3]) / max(total, 1)
         if criterion is not None:
-            return acc, exit_counts, avg_exit, val_loss
-        return acc, exit_counts, avg_exit
-    return (acc, val_loss) if criterion is not None else acc
+            return acc, exit_counts, avg_exit, val_loss, balanced_acc
+        return acc, exit_counts, avg_exit, balanced_acc
+    if criterion is not None:
+        return acc, val_loss, balanced_acc
+    return acc, balanced_acc
 
 
 def _compute_aux_losses(model, aux, lambda_anatomy, lambda_sparse, schedule):
@@ -489,16 +574,26 @@ def init_log(out_dir: str):
     if not os.path.exists(log_path):
         with open(log_path, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["time", "epoch", "train_loss", "train_acc", "val_acc", "val_loss"])
+            w.writerow(
+                ["time", "epoch", "train_loss", "train_acc", "val_acc", "val_balanced", "val_loss"]
+            )
     return log_path
 
 
-def append_log(log_path: str, epoch: int, train_loss: float, train_acc: float, val_acc: float, val_loss: float):
+def append_log(
+    log_path: str,
+    epoch: int,
+    train_loss: float,
+    train_acc: float,
+    val_acc: float,
+    val_balanced: float,
+    val_loss: float,
+):
     with open(log_path, "a", newline="") as f:
         w = csv.writer(f)
         w.writerow([
             time.strftime("%Y-%m-%d %H:%M:%S"), epoch,
-            f"{train_loss:.6f}", f"{train_acc:.6f}", f"{val_acc:.6f}", f"{val_loss:.6f}"
+            f"{train_loss:.6f}", f"{train_acc:.6f}", f"{val_acc:.6f}", f"{val_balanced:.6f}", f"{val_loss:.6f}"
         ])
 
 
@@ -612,7 +707,20 @@ def main():
 
     print(f"ViT depth (num blocks): {depth}")
 
-    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+    ce_weight: Optional[torch.Tensor] = None
+    train_class_counts: Optional[List[int]] = None
+    if args.ce_class_weights == "auto":
+        ce_weight, train_class_counts = ce_class_weight_tensor(
+            train_csv, label_map, num_classes, device
+        )
+        print(
+            f"CE class weights (auto, train counts): {train_class_counts} -> "
+            f"{ce_weight.detach().cpu().tolist()}"
+        )
+    criterion = nn.CrossEntropyLoss(
+        weight=ce_weight,
+        label_smoothing=args.label_smoothing,
+    )
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     use_amp = args.amp and (device.type == "cuda")
@@ -621,8 +729,12 @@ def main():
     ensure_outdir(args.out_dir)
     log_path = init_log(args.out_dir)
 
-    best_val = -1.0
+    best_track = float("-inf")  # maximize; for loss metric use -val_loss
     best_path = os.path.join(args.out_dir, "best.pt")
+    patience_ctr = 0
+    best_val_acc = -1.0
+    best_val_balanced = -1.0
+    best_val_loss = float("inf")
 
     print(f"Device: {device} | AMP: {use_amp}")
     print(f"Train: {train_csv} (n={len(train_ds)})")
@@ -645,7 +757,9 @@ def main():
         f"| alpha={args.alpha} beta={args.beta}"
     )
     print(
-        f"Regularization: weight_decay={args.weight_decay} label_smoothing={args.label_smoothing} | "
+        f"Regularization: weight_decay={args.weight_decay} label_smoothing={args.label_smoothing} "
+        f"| ce_class_weights={args.ce_class_weights} | best_metric={args.best_metric} "
+        f"| early_stopping_patience={args.early_stopping_patience} | "
         f"train_aug={args.train_aug} (deg={args.aug_deg}, translate={args.aug_translate}, "
         f"noise={args.aug_noise}, flip_p={args.aug_flip_prob})"
     )
@@ -692,31 +806,80 @@ def main():
             )
 
         if args.tau is None:
-            val_acc, val_loss = evaluate(model, val_loader, device, criterion=criterion)
+            val_acc, val_loss, val_balanced = evaluate(
+                model, val_loader, device, criterion=criterion, num_classes=num_classes
+            )
         else:
-            val_acc, exit_counts, avg_exit, val_loss = evaluate(
-                model, val_loader, device, tau=args.tau, tau_u=args.tau_u, criterion=criterion
+            val_acc, exit_counts, avg_exit, val_loss, val_balanced = evaluate(
+                model,
+                val_loader,
+                device,
+                tau=args.tau,
+                tau_u=args.tau_u,
+                criterion=criterion,
+                num_classes=num_classes,
             )
             print(f"[val early-exit] tau={args.tau} exit_counts={exit_counts} avg_exit={avg_exit:.3f}")
 
-        dt = time.time() - t0
-        print(f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} val_acc={val_acc:.4f} val_loss={val_loss:.4f} time={dt:.1f}s")
-        append_log(log_path, ep, train_loss, train_acc, val_acc, val_loss)
+        if args.best_metric == "acc":
+            track_now = val_acc
+        elif args.best_metric == "balanced_acc":
+            track_now = val_balanced
+        else:
+            track_now = -float(val_loss)
 
-        if val_acc > best_val:
-            best_val = val_acc
+        improved = track_now > best_track + 1e-6
+        if improved:
+            best_track = track_now
+            best_val_acc = val_acc
+            best_val_balanced = val_balanced
+            best_val_loss = float(val_loss)
             torch.save(model.state_dict(), best_path)
+            patience_ctr = 0
+        elif args.early_stopping_patience > 0:
+            patience_ctr += 1
+
+        dt = time.time() - t0
+        if args.tau is None:
+            print(
+                f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
+                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_loss={val_loss:.4f} time={dt:.1f}s"
+            )
+        else:
+            print(
+                f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
+                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_loss={val_loss:.4f} time={dt:.1f}s"
+            )
+        append_log(log_path, ep, train_loss, train_acc, val_acc, val_balanced, val_loss)
+
+        if args.early_stopping_patience > 0 and patience_ctr >= args.early_stopping_patience:
+            print(
+                f"Early stopping at epoch {ep} (no {args.best_metric} improvement for "
+                f"{args.early_stopping_patience} epochs)"
+            )
+            break
 
     # final test
     model.load_state_dict(torch.load(best_path, map_location=device))
     if args.tau is None:
-        test_acc = evaluate(model, test_loader, device)
-        print(f"Done. best_val_acc={best_val:.4f} test_acc={test_acc:.4f}")
-    else:
-        test_acc, exit_counts, avg_exit = evaluate(
-            model, test_loader, device, tau=args.tau, tau_u=args.tau_u
+        test_acc, test_balanced = evaluate(model, test_loader, device, num_classes=num_classes)
+        print(
+            f"Done. best.checkpoint: val_acc={best_val_acc:.4f} val_balanced={best_val_balanced:.4f} "
+            f"val_loss={best_val_loss:.4f} | test_acc={test_acc:.4f} test_balanced={test_balanced:.4f}"
         )
-        print(f"Done. best_val_acc={best_val:.4f} test_acc={test_acc:.4f} (early-exit tau={args.tau})")
+    else:
+        test_acc, exit_counts, avg_exit, test_balanced = evaluate(
+            model,
+            test_loader,
+            device,
+            tau=args.tau,
+            tau_u=args.tau_u,
+            num_classes=num_classes,
+        )
+        print(
+            f"Done. best val_acc={best_val_acc:.4f} val_balanced={best_val_balanced:.4f} "
+            f"test_acc={test_acc:.4f} test_balanced={test_balanced:.4f} (early-exit tau={args.tau})"
+        )
         print(f"Exit counts: {exit_counts} | Avg exit: {avg_exit:.3f}")
 
     print(f"Best checkpoint: {best_path}")
@@ -724,8 +887,12 @@ def main():
 
     # save results.json for run_slice_selection.py / run_compare_thin_methods.py
     results = {
-        "best_val_acc": best_val,
+        "best_val_acc": best_val_acc,
+        "best_val_balanced": best_val_balanced,
+        "best_val_loss": best_val_loss,
+        "best_metric": args.best_metric,
         "test_acc": test_acc,
+        "test_balanced": test_balanced,
         "slice_selector": args.slice_selector,
         "z_index": args.z_index,
         "z_frac": args.z_frac,
@@ -747,6 +914,10 @@ def main():
         "weight_decay": args.weight_decay,
         "epochs": args.epochs,
         "label_smoothing": args.label_smoothing,
+        "ce_class_weights": args.ce_class_weights,
+        "train_class_counts": train_class_counts,
+        "ce_weight": ce_weight.detach().cpu().tolist() if ce_weight is not None else None,
+        "early_stopping_patience": args.early_stopping_patience,
         "train_aug": args.train_aug,
         "aug_deg": args.aug_deg,
         "aug_translate": args.aug_translate,

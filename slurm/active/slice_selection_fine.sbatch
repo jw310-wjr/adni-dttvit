@@ -38,7 +38,7 @@ python run_all/run_slice_selection.py \
   --results_csv results/z_results_fine.csv \
   --epochs 30 \
   --batch_size 8 \
-  --train_extra "--amp --lr 1e-4 --weight_decay 0.1 --num_workers 4"
+  --train_extra "--amp --lr 1e-4 --weight_decay 0.1 --num_workers 4 --ce_class_weights none --label_smoothing 0 --best_metric acc"
 
 echo "=== DONE ==="
 date

@@ -8,8 +8,8 @@
 #SBATCH -o /scratch/jw310/adni-dttvit/runs/logs/baseline_%j.out
 #SBATCH -e /scratch/jw310/adni-dttvit/runs/logs/baseline_%j.err
 
-# Protocol: mild aug + light wd, no label smoothing (prior stack caused ~chance CE/acc — underfit).
-# If val >> train again, re-add --label_smoothing 0.03–0.05 and/or raise --weight_decay.
+# Balanced protocol: mid WD + mild LS + auto CE class weights + mild aug; best.pt by val_balanced;
+# early stopping if val_balanced stalls (reduces overfit). See train.py --help.
 
 set -euo pipefail
 
@@ -17,7 +17,7 @@ PROJECT=/scratch/jw310/adni-dttvit
 VENV=/scratch/jw310/venvs/torch_fix/bin/activate
 
 Z_INDEX="${Z_INDEX:-144}"
-echo "=== ViT2D Baseline (aug + light wd, z=${Z_INDEX}) ==="
+echo "=== ViT2D Baseline (balanced train, z=${Z_INDEX}) ==="
 hostname
 date
 echo
@@ -30,8 +30,6 @@ export TIMM_CACHE_DIR=/scratch/jw310/torch_cache/timm
 cd ${PROJECT}
 export PYTHONPATH=${PROJECT}:${PYTHONPATH:-}
 
-# Training protocol: see HPC_QUICKSTART.md § "Fixed training protocol (anti-overfit baseline)"
-# After slice_selection: Z_INDEX=<best from results/z_results.csv> sbatch slurm/active/baseline.sbatch
 python run_all/train.py \
   --manifest_dir manifests \
   --data_root ${PROJECT} \
@@ -40,13 +38,16 @@ python run_all/train.py \
   --epochs 50 \
   --batch_size 8 \
   --num_workers 4 \
-  --lr 3e-4 \
-  --weight_decay 0.08 \
-  --label_smoothing 0 \
+  --lr 2.5e-4 \
+  --weight_decay 0.09 \
+  --label_smoothing 0.035 \
+  --ce_class_weights auto \
+  --best_metric balanced_acc \
+  --early_stopping_patience 15 \
   --train_aug \
-  --aug_deg 8 \
-  --aug_translate 0.025 \
-  --aug_noise 0.02 \
+  --aug_deg 10 \
+  --aug_translate 0.03 \
+  --aug_noise 0.025 \
   --aug_flip_prob 0.0 \
   --out_dir runs/vit2d_baseline \
   --amp

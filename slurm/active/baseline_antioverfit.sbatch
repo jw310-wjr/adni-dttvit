@@ -37,6 +37,9 @@ python run_all/train.py \
   --epochs 30 \
   --lr 1e-4 \
   --weight_decay 0.1 \
+  --label_smoothing 0 \
+  --ce_class_weights none \
+  --best_metric acc \
   --amp
 
 echo "=== DONE ==="
