@@ -380,13 +380,14 @@ def build_vit2d(
     anatomical_prior_slice: Optional[int] = None,
     gumbel_tau: float = 0.0,
     pretrained: bool = True,
+    in_chans: int = 1,
     drop_rate: float = 0.0,
     drop_path_rate: float = 0.0,
 ):
     vit = timm.create_model(
         "vit_base_patch16_224",
         pretrained=pretrained,
-        in_chans=1,
+        in_chans=in_chans,
         num_classes=num_classes,
         drop_rate=drop_rate,
         drop_path_rate=drop_path_rate,

@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH -c 4
 #SBATCH --mem=32G
-#SBATCH -t 14:00:00
+#SBATCH -t 12:00:00
 #SBATCH -o /scratch/jw310/adni-dttvit/runs/logs/dtt_ee_%j.out
 #SBATCH -e /scratch/jw310/adni-dttvit/runs/logs/dtt_ee_%j.err
 
@@ -15,7 +15,7 @@ VENV=/scratch/jw310/venvs/torch_fix/bin/activate
 
 THIN_METHOD=${THIN_METHOD:-attn}
 
-echo "=== ViT2D DTT + Early Exit (thin_method=${THIN_METHOD}) ==="
+echo "=== ViT2D DTT + Early Exit (thin_method=${THIN_METHOD}, conservative train) ==="
 hostname
 date
 echo
@@ -34,25 +34,23 @@ python run_all/train.py \
   --data_root ${PROJECT} \
   --slice_selector fixed \
   --z_index "${Z_INDEX}" \
-  --epochs 60 \
+  --epochs 50 \
   --batch_size 8 \
   --num_workers 4 \
-  --lr 3e-4 \
-  --weight_decay 0.085 \
-  --label_smoothing 0.03 \
+  --lr 1e-4 \
+  --weight_decay 0.01 \
+  --label_smoothing 0.02 \
   --ce_class_weights auto \
-  --best_metric hmean \
-  --early_stopping_patience 18 \
-  --early_stopping_min_delta 0.004 \
+  --train_sampler shuffle \
+  --best_metric balanced_acc \
+  --early_stopping_patience 15 \
+  --early_stopping_min_delta 0.005 \
   --lr_scheduler cosine \
-  --warmup_epochs 5 \
-  --lr_min_ratio 0.06 \
-  --train_sampler balanced \
-  --drop_path_rate 0.08 \
+  --warmup_epochs 3 \
+  --lr_min_ratio 0.05 \
+  --drop_path_rate 0.05 \
   --train_aug \
-  --aug_deg 10 \
-  --aug_translate 0.03 \
-  --aug_noise 0.025 \
+  --aug_noise 0.015 \
   --out_dir runs/vit2d_dtt_ee_${THIN_METHOD} \
   --amp \
   --thinning \

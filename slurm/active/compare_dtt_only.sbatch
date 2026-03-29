@@ -34,9 +34,9 @@ python run_all/run_compare_dtt_only.py \
   --data_root ${PROJECT} \
   --out_base runs/compare_dtt_only \
   --results_dir results \
-  --epochs 60 \
+  --epochs 50 \
   --z_index "${Z_INDEX}" \
-  --train_extra "--amp --lr 3e-4 --weight_decay 0.085 --num_workers 4 --label_smoothing 0.03 --ce_class_weights auto --best_metric hmean --early_stopping_patience 18 --early_stopping_min_delta 0.004 --lr_scheduler cosine --warmup_epochs 5 --lr_min_ratio 0.06 --train_sampler balanced --drop_path_rate 0.08 --train_aug --aug_deg 10 --aug_translate 0.03 --aug_noise 0.025"
+  --train_extra "--amp --lr 1e-4 --weight_decay 0.01 --num_workers 4 --label_smoothing 0.02 --ce_class_weights auto --train_sampler shuffle --best_metric balanced_acc --early_stopping_patience 15 --early_stopping_min_delta 0.005 --lr_scheduler cosine --warmup_epochs 3 --lr_min_ratio 0.05 --drop_path_rate 0.05 --train_aug --aug_noise 0.015"
 
 echo "=== DONE ==="
 date

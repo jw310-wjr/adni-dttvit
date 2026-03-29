@@ -27,7 +27,7 @@ import torch
 import pandas as pd
 from torch.utils.data import DataLoader
 
-from src.data.dataset_nii2d import Nii2DSliceDataset
+from src.data.dataset_nii2d import Nii2DSliceDataset, in_chans_for_slice_stack_mode
 from src.models.vit2d import build_vit2d
 
 try:
@@ -197,9 +197,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     csv_path = os.path.join(args.manifest_dir, args.manifest)
-    slice_cfg = {"slice_selector": "fixed", "data_root": args.data_root, "z_index": args.z_index}
-    ds = Nii2DSliceDataset(csv_path, label_map=label_map, **slice_cfg)
-    loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     if args.run_dirs:
         run_list = [(os.path.basename(d.rstrip("/")), d) for d in args.run_dirs]
@@ -226,6 +223,21 @@ def main():
         early_exit = cfg.get("early_exit", False) if cfg else False
         use_anatomical_prior = cfg.get("use_anatomical_prior", False) if cfg else False
 
+        slice_stack_mode = (cfg.get("slice_stack_mode", "single") if cfg else "single") or "single"
+        z_for_ds = cfg.get("z_index", args.z_index) if cfg and cfg.get("z_index") is not None else args.z_index
+        in_chans = cfg.get("in_chans") if cfg else None
+        if in_chans is None:
+            in_chans = in_chans_for_slice_stack_mode(slice_stack_mode)
+
+        slice_cfg = {
+            "slice_selector": "fixed",
+            "data_root": args.data_root,
+            "z_index": z_for_ds,
+            "slice_stack_mode": slice_stack_mode,
+        }
+        ds = Nii2DSliceDataset(csv_path, label_map=label_map, **slice_cfg)
+        loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
         model = build_vit2d(
             num_classes=num_classes,
             thinning=thinning,
@@ -235,6 +247,7 @@ def main():
             anatomical_prior_path=cfg.get("anatomical_prior_path") if cfg else None,
             anatomical_prior_slice=cfg.get("anatomical_prior_slice") if cfg else None,
             pretrained=not args.no_pretrained,
+            in_chans=in_chans,
         ).to(device)
         model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=True)
 
@@ -245,7 +258,7 @@ def main():
         )
 
         num_params = count_params(model)
-        gflops = count_flops(model, device)
+        gflops = count_flops(model, device, input_shape=(in_chans, 224, 224))
         if ref_time_ms is None:
             ref_time_ms = ms
         speedup = ref_time_ms / ms if ref_time_ms and ms else None

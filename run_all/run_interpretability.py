@@ -25,7 +25,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.data.dataset_nii2d import Nii2DSliceDataset
+from src.data.dataset_nii2d import Nii2DSliceDataset, in_chans_for_slice_stack_mode
 from src.models.vit2d import build_vit2d
 
 
@@ -111,7 +111,9 @@ def plot_overlay_mri(mri_slice, scores, out_path, title="", grid_size=14):
     if isinstance(mri_slice, torch.Tensor):
         mri_slice = mri_slice.cpu().numpy()
     if mri_slice.ndim == 3:
-        mri_slice = mri_slice[0]  # (C,H,W) -> (H,W)
+        c = mri_slice.shape[0]
+        mid = c // 2 if c > 1 else 0  # show anatomical center slice for 2.5D stacks
+        mri_slice = mri_slice[mid]
     if scores.ndim == 2:
         scores = scores[0]
     scores_2d = scores.reshape(grid_size, grid_size)
@@ -214,6 +216,12 @@ def main():
         with open(cfg_path) as f:
             cfg = json.load(f)
 
+    slice_stack_mode = cfg.get("slice_stack_mode", "single")
+    z_train = cfg.get("z_index", 77)
+    in_chans = cfg.get("in_chans")
+    if in_chans is None:
+        in_chans = in_chans_for_slice_stack_mode(slice_stack_mode)
+
     model = build_vit2d(
         num_classes=num_classes,
         thinning=True,
@@ -223,12 +231,18 @@ def main():
         anatomical_prior_path=cfg.get("anatomical_prior_path"),
         anatomical_prior_slice=cfg.get("anatomical_prior_slice"),
         pretrained=not args.no_pretrained,
+        in_chans=in_chans,
     ).to(device)
     model.load_state_dict(torch.load(args.ckpt, map_location=device), strict=True)
     model.eval()
 
     csv_path = os.path.join(args.manifest_dir, args.manifest)
-    slice_cfg = {"slice_selector": "fixed", "data_root": args.data_root, "z_index": 77}
+    slice_cfg = {
+        "slice_selector": "fixed",
+        "data_root": args.data_root,
+        "z_index": int(z_train),
+        "slice_stack_mode": slice_stack_mode,
+    }
     ds = Nii2DSliceDataset(csv_path, label_map=label_map, **slice_cfg)
     loader = DataLoader(ds, batch_size=1, shuffle=True, num_workers=0)
 
@@ -267,7 +281,7 @@ def main():
             print(f"Saved {out_path}")
 
             if args.overlay_mri:
-                mri_slice = x[0]  # (3,224,224)
+                mri_slice = x[0]  # (C,224,224)
                 out_path_overlay = os.path.join(
                     args.out_dir, f"sample{idx}_{label_str}_block{blk_idx}_overlay.png"
                 )

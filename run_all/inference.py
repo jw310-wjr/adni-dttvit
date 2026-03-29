@@ -16,7 +16,7 @@ import torch
 import pandas as pd
 from torch.utils.data import DataLoader
 
-from src.data.dataset_nii2d import Nii2DSliceDataset
+from src.data.dataset_nii2d import Nii2DSliceDataset, in_chans_for_slice_stack_mode
 from src.models.vit2d import build_vit2d
 
 
@@ -29,6 +29,12 @@ def parse_args():
     p.add_argument("--label_map", default="CN=0,AD=1", help="Binary: CN=0,AD=1")
     p.add_argument("--slice_selector", default="fixed")
     p.add_argument("--z_index", type=int, default=77)
+    p.add_argument(
+        "--slice_stack_mode",
+        default="single",
+        choices=["single", "stack3", "stack5"],
+        help="Must match training (see results.json).",
+    )
     p.add_argument("--thinning", action="store_true")
     p.add_argument("--thin_method", default="attn")
     p.add_argument("--early_exit", action="store_true")
@@ -54,6 +60,8 @@ def main():
     slice_cfg = {"slice_selector": args.slice_selector, "data_root": args.data_root}
     if args.slice_selector == "fixed":
         slice_cfg["z_index"] = args.z_index
+    slice_cfg["slice_stack_mode"] = args.slice_stack_mode
+    in_ch = in_chans_for_slice_stack_mode(args.slice_stack_mode)
     ds = Nii2DSliceDataset(csv_path, label_map=label_map, **slice_cfg)
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
@@ -63,6 +71,7 @@ def main():
         thin_method=args.thin_method,
         enable_early_exit=args.early_exit,
         pretrained=not args.no_pretrained,
+        in_chans=in_ch,
     ).to(device)
     model.load_state_dict(torch.load(args.ckpt, map_location=device), strict=True)
     model.eval()

@@ -17,7 +17,10 @@ import torch.nn.functional as F
 from torch import nn, optim
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from src.data.dataset_nii2d import Nii2DSliceDataset
+from src.data.dataset_nii2d import (
+    Nii2DSliceDataset,
+    in_chans_for_slice_stack_mode,
+)
 from src.data.dataset_npy2d import ADNINPY2DDataset
 from src.models.vit2d import build_vit2d
 
@@ -77,23 +80,35 @@ def parse_args():
         default=None,
         help="Fixed z as fraction of depth (0-1, used when slice_selector=fixed if z_index not set)"
     )
+    p.add_argument(
+        "--slice_stack_mode",
+        default="single",
+        choices=["single", "stack3", "stack5"],
+        help="2.5D: single=one axial slice (C=1); stack3=[z-1,z,z+1]; stack5=[z-2..z+2] (clamped). "
+        "Compare centers with e.g. --z_index 77|115|127|144 under the same training recipe.",
+    )
 
     # training
     p.add_argument("--epochs", type=int, default=50, help="Default 50, aligned with SLURM baseline config")
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--num_workers", type=int, default=2)
-    p.add_argument("--lr", type=float, default=2.5e-4, help="Default mid between 1e-4 and 3e-4 for stability + learning")
+    p.add_argument(
+        "--lr",
+        type=float,
+        default=1e-4,
+        help="Conservative default for pretrained ViT fine-tune (try 1e-4–2.5e-4)",
+    )
     p.add_argument(
         "--weight_decay",
         type=float,
-        default=0.09,
-        help="AdamW L2; ~0.08–0.10 balances under/over-fit for this setup",
+        default=0.01,
+        help="AdamW L2; low WD (e.g. 0.005–0.02) with pretrained ViT + CE class weights",
     )
     p.add_argument(
         "--label_smoothing",
         type=float,
-        default=0.035,
-        help="Mild CE smoothing (0=off; too high + strong WD tends to underfit)",
+        default=0.02,
+        help="Mild CE smoothing (0=off; keep small when WD is already low)",
     )
     p.add_argument(
         "--ce_class_weights",
@@ -141,7 +156,8 @@ def parse_args():
         "--train_sampler",
         default="shuffle",
         choices=["shuffle", "balanced"],
-        help="balanced: WeightedRandomSampler (inverse freq per sample) for CN/AD mix each epoch",
+        help="shuffle: default. balanced: WeightedRandomSampler—do not combine with --ce_class_weights auto "
+        "(double imbalance correction); use one or the other.",
     )
     p.add_argument(
         "--drop_path_rate",
@@ -158,12 +174,15 @@ def parse_args():
     p.add_argument(
         "--train_aug",
         action="store_true",
-        help="Training-only 2D augment (rotate/translate/noise). L-R flip is not supported (brain L/R anatomy).",
+        help="Training-only augment: optional translate (default off) + noise. No flip/rotation (MNI + L/R anatomy).",
     )
-    p.add_argument("--aug_deg", type=float, default=12.0, help="Max |rotation| degrees for --train_aug")
-    p.add_argument("--aug_translate", type=float, default=0.04,
-                   help="Max shift as fraction of H,W for --train_aug")
-    p.add_argument("--aug_noise", type=float, default=0.03, help="Gaussian noise std on normalized slice")
+    p.add_argument(
+        "--aug_translate",
+        type=float,
+        default=0.0,
+        help="Max shift as fraction of H,W when --train_aug (default 0: registered MNI space; avoid reintroducing misalignment)",
+    )
+    p.add_argument("--aug_noise", type=float, default=0.015, help="Gaussian noise std on normalized slice")
     p.add_argument("--seed", type=int, default=0)
 
     # output
@@ -723,6 +742,11 @@ def append_log(
 
 def main():
     args = parse_args()
+    if args.ce_class_weights == "auto" and args.train_sampler == "balanced":
+        raise ValueError(
+            "Do not combine --ce_class_weights auto with --train_sampler balanced "
+            "(double imbalance correction). Use shuffle + auto, or balanced + --ce_class_weights none."
+        )
     set_seed(args.seed)
 
     label_map = parse_label_map(args.label_map)
@@ -735,6 +759,7 @@ def main():
     test_csv = os.path.join(args.manifest_dir, "test.csv")
 
     # ---- choose dataset by input_type ----
+    vit_in_chans = 1
     if args.input_type == "npy":
         train_ds = ADNINPY2DDataset(train_csv, label_map=label_map, data_root=args.data_root)
         val_ds   = ADNINPY2DDataset(val_csv,   label_map=label_map, data_root=args.data_root)
@@ -752,17 +777,18 @@ def main():
                 slice_cfg["z_frac"] = args.z_frac
             else:
                 slice_cfg["z_index"] = args.z_index  # default 77 (middle)
+        slice_cfg["slice_stack_mode"] = args.slice_stack_mode
         train_ds = Nii2DSliceDataset(
             train_csv,
             label_map=label_map,
             augment=args.train_aug,
-            aug_deg=args.aug_deg,
             aug_translate=args.aug_translate,
             aug_noise=args.aug_noise,
             **slice_cfg,
         )
         val_ds = Nii2DSliceDataset(val_csv, label_map=label_map, **slice_cfg)
         test_ds = Nii2DSliceDataset(test_csv, label_map=label_map, **slice_cfg)
+        vit_in_chans = in_chans_for_slice_stack_mode(args.slice_stack_mode)
 
     train_sampler = None
     if args.train_sampler == "balanced":
@@ -822,6 +848,7 @@ def main():
         anatomical_prior_slice=args.anatomical_prior_slice,
         gumbel_tau=args.gumbel_tau if args.thin_method == "learnable" else 0.0,
         pretrained=not args.no_pretrained,
+        in_chans=vit_in_chans,
         drop_rate=args.drop_rate,
         drop_path_rate=args.drop_path_rate,
     ).to(device)
@@ -839,6 +866,7 @@ def main():
             anatomical_prior_path=args.anatomical_prior_path,
             anatomical_prior_slice=args.anatomical_prior_slice,
             pretrained=not args.no_pretrained,
+            in_chans=vit_in_chans,
             drop_rate=0.0,
             drop_path_rate=0.0,
         ).to(device)
@@ -898,6 +926,7 @@ def main():
             sel_info += f" | entropy_topk={args.entropy_topk}"
         elif args.slice_selector == "fixed":
             sel_info += f" | z_index={args.z_index} | z_frac={args.z_frac}"
+        sel_info += f" | slice_stack_mode={args.slice_stack_mode} (in_chans={vit_in_chans})"
         print(sel_info)
     else:
         print("Input: pre-extracted fixed-z 2D slices (.npy); slice selector not used.")
@@ -915,8 +944,8 @@ def main():
         f"lr_scheduler={args.lr_scheduler} warmup_epochs={args.warmup_epochs} "
         f"(eta_min={args.lr * args.lr_min_ratio:.2e}) | "
         f"train_sampler={args.train_sampler} | "
-        f"train_aug={args.train_aug} (deg={args.aug_deg}, translate={args.aug_translate}, "
-        f"noise={args.aug_noise}; no L-R flip)"
+        f"train_aug={args.train_aug} (translate={args.aug_translate}, "
+        f"noise={args.aug_noise}; no L-R flip, no rotation)"
     )
     if args.tau is not None:
         print(f"Early-exit eval tau: {args.tau}")
@@ -1067,6 +1096,8 @@ def main():
         "slice_selector": args.slice_selector,
         "z_index": args.z_index,
         "z_frac": args.z_frac,
+        "slice_stack_mode": args.slice_stack_mode,
+        "in_chans": vit_in_chans,
         "thinning": args.thinning,
         "thin_method": args.thin_method,
         "gumbel_tau": args.gumbel_tau,
@@ -1097,7 +1128,6 @@ def main():
         "drop_path_rate": args.drop_path_rate,
         "drop_rate": args.drop_rate,
         "train_aug": args.train_aug,
-        "aug_deg": args.aug_deg,
         "aug_translate": args.aug_translate,
         "aug_noise": args.aug_noise,
     }

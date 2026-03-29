@@ -7,6 +7,7 @@ Usage:
   python run_all/run_eval_early_exit_tau.py --ckpt runs/student_distill/best.pt --tau_list 0.5 0.7 0.8 0.9
 """
 import argparse
+import json
 import os
 import sys
 
@@ -19,7 +20,7 @@ if PROJECT_ROOT not in sys.path:
 import torch
 from torch.utils.data import DataLoader
 
-from src.data.dataset_nii2d import Nii2DSliceDataset
+from src.data.dataset_nii2d import Nii2DSliceDataset, in_chans_for_slice_stack_mode
 from src.models.vit2d import build_vit2d
 
 
@@ -74,7 +75,25 @@ def main():
 
     val_csv = os.path.join(args.manifest_dir, "val.csv")
     test_csv = os.path.join(args.manifest_dir, "test.csv")
-    slice_cfg = {"slice_selector": "fixed", "data_root": args.data_root, "z_index": 77}
+
+    run_dir = os.path.dirname(os.path.abspath(args.ckpt))
+    cfg_path = os.path.join(run_dir, "results.json")
+    tr_cfg = {}
+    if os.path.isfile(cfg_path):
+        with open(cfg_path) as f:
+            tr_cfg = json.load(f)
+    slice_stack_mode = tr_cfg.get("slice_stack_mode", "single")
+    z_idx = tr_cfg.get("z_index", 77)
+    in_chans = tr_cfg.get("in_chans")
+    if in_chans is None:
+        in_chans = in_chans_for_slice_stack_mode(slice_stack_mode)
+
+    slice_cfg = {
+        "slice_selector": "fixed",
+        "data_root": args.data_root,
+        "z_index": int(z_idx),
+        "slice_stack_mode": slice_stack_mode,
+    }
     val_ds = Nii2DSliceDataset(val_csv, label_map=label_map, **slice_cfg)
     test_ds = Nii2DSliceDataset(test_csv, label_map=label_map, **slice_cfg)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
@@ -86,6 +105,7 @@ def main():
         thin_method=args.thin_method,
         enable_early_exit=True,
         pretrained=not args.no_pretrained,
+        in_chans=in_chans,
     ).to(device)
     model.load_state_dict(torch.load(args.ckpt, map_location=device), strict=True)
 
