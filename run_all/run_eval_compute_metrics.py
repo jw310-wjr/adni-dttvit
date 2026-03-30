@@ -172,21 +172,33 @@ def evaluate_with_timing(model, loader, device, tau=None, tau_u=None, warmup=5, 
 
 def default_run_dirs(project_root):
     """
-    Pipeline: Baseline -> Only EE -> DTT only (3 methods) -> DTT+EE -> Student
+    Default table order: first row = reference for **speedup** (wall-clock ref / this_model).
+
+    Mainline (stack3, z=115) + optional DTT / thin-method dirs if present (skipped if no best.pt).
+
+    Notes:
+    - **ms/sample**, **avg_exit** (early-exit), **peak_memory_MB**: measured at inference.
+    - **GFLOPs**: static estimate (full forward); dynamic token dropping in DTT is better reflected by **ms/sample** than GFLOPs alone.
     """
     base = project_root
+    r = os.path.join
     return [
-        ("Baseline", os.path.join(base, "runs/vit2d_baseline")),
-        ("Only_EE", os.path.join(base, "runs/compare_ablation/only_ee")),
-        ("DTT_L2_only", os.path.join(base, "runs/compare_dtt_only/l2")),
-        ("DTT_Attn_only", os.path.join(base, "runs/compare_dtt_only/attn")),
-        ("DTT_Random_only", os.path.join(base, "runs/compare_dtt_only/random")),
-        ("DTT_Learnable_only", os.path.join(base, "runs/compare_dtt_only/learnable")),
-        ("DTT_L2+EE", os.path.join(base, "runs/compare_thin_methods/l2")),
-        ("DTT_Attn+EE", os.path.join(base, "runs/compare_thin_methods/attn")),
-        ("DTT_Random+EE", os.path.join(base, "runs/compare_thin_methods/random")),
-        ("DTT_Learnable+EE", os.path.join(base, "runs/compare_thin_methods/learnable")),
-        ("Student", os.path.join(base, "runs/student_distill")),
+        ("Baseline_stack3_z115", r(base, "runs/vit2d_baseline_stack3_z115")),
+        ("DTT_EE_attn", r(base, "runs/vit2d_dtt_ee_attn")),
+        ("Student_distill_z115", r(base, "runs/student_distill_stack3_z115")),
+        ("DTT_only_l2", r(base, "runs/compare_dtt_only/l2")),
+        ("DTT_only_attn", r(base, "runs/compare_dtt_only/attn")),
+        ("DTT_only_random", r(base, "runs/compare_dtt_only/random")),
+        ("DTT_only_learnable", r(base, "runs/compare_dtt_only/learnable")),
+        ("Thin_baseline", r(base, "runs/compare_thin_methods/baseline")),
+        ("Thin_l2", r(base, "runs/compare_thin_methods/l2")),
+        ("Thin_attn", r(base, "runs/compare_thin_methods/attn")),
+        ("Thin_random", r(base, "runs/compare_thin_methods/random")),
+        ("Thin_learnable", r(base, "runs/compare_thin_methods/learnable")),
+        # Legacy / ablation paths (may be absent)
+        ("Baseline_legacy", r(base, "runs/vit2d_baseline")),
+        ("Only_EE", r(base, "runs/compare_ablation/only_ee")),
+        ("Student_legacy", r(base, "runs/student_distill")),
     ]
 
 
@@ -279,7 +291,8 @@ def main():
         auc_s = f" AUROC={auroc:.4f}" if auroc is not None else ""
         print(f"{name}: acc={acc:.4f}{auc_s} ms/sample={ms:.2f} speedup={speedup:.2f}x avg_exit={avg_exit}{pm}{gf}")
 
-    # Speedup = ref_time / this_time (first model as ref)
+    # speedup column = ref_ms / this_ms where ref is the **first row that had a valid checkpoint**
+    print("\n# speedup is vs first successful model in this table (see config column order).", file=sys.stderr)
 
     df = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)

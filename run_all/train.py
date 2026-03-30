@@ -1093,6 +1093,7 @@ def main():
         "best_metric": args.best_metric,
         "test_acc": test_acc,
         "test_balanced": test_balanced,
+        "test_hmean": val_hmean_acc_balanced(test_acc, test_balanced),
         "slice_selector": args.slice_selector,
         "z_index": args.z_index,
         "z_frac": args.z_frac,

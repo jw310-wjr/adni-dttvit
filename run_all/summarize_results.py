@@ -15,6 +15,7 @@ import glob
 import json
 import os
 import sys
+from typing import Optional
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
@@ -24,6 +25,16 @@ if PROJECT_ROOT not in sys.path:
 def load_results(path: str) -> dict:
     with open(path) as f:
         return json.load(f)
+
+
+def _hmean_acc_bal(a: Optional[float], b: Optional[float], eps: float = 1e-8) -> Optional[float]:
+    """Harmonic mean of acc and balanced_acc (same as train.py val_hmean)."""
+    if a is None or b is None:
+        return None
+    a, b = float(a), float(b)
+    if a <= eps or b <= eps:
+        return None
+    return 2.0 * a * b / (a + b)
 
 
 def main():
@@ -41,7 +52,16 @@ def main():
     p.add_argument(
         "--sort",
         default="dir",
-        choices=["dir", "z_index", "best_val_balanced", "test_balanced", "best_val_acc", "test_acc"],
+        choices=[
+            "dir",
+            "z_index",
+            "best_val_balanced",
+            "test_balanced",
+            "best_val_acc",
+            "test_acc",
+            "best_val_hmean",
+            "test_hmean",
+        ],
         help="Sort key (z_index requires z in run path or results.json)",
     )
     args = p.parse_args()
@@ -62,6 +82,10 @@ def main():
             print(f"[skip] {path}: {e}", file=sys.stderr)
             continue
         z = d.get("z_index")
+        ta, tb = d.get("test_acc"), d.get("test_balanced")
+        test_hmean = d.get("test_hmean")
+        if test_hmean is None:
+            test_hmean = _hmean_acc_bal(ta, tb)
         rows.append({
             "dir": rel,
             "z_index": z,
@@ -70,8 +94,10 @@ def main():
             "best_val_acc": d.get("best_val_acc"),
             "best_val_balanced": d.get("best_val_balanced"),
             "best_val_hmean": d.get("best_val_hmean"),
-            "test_acc": d.get("test_acc"),
-            "test_balanced": d.get("test_balanced"),
+            "best_val_loss": d.get("best_val_loss"),
+            "test_acc": ta,
+            "test_balanced": tb,
+            "test_hmean": test_hmean,
         })
 
     if args.sort != "dir":
@@ -81,14 +107,20 @@ def main():
             v = r.get(args.sort)
             if v is None:
                 return float("-inf")
-            return float(v)
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return float("-inf")
 
         rows.sort(key=key, reverse=rev)
     else:
         rows.sort(key=lambda r: r["dir"])
 
-    # header
-    cols = ["dir", "z", "mode", "C", "val_acc", "val_bal", "val_hmean", "test_acc", "test_bal"]
+    # header (val_hmean = harmonic mean val_acc & val_bal; test_hmean same on test set)
+    cols = [
+        "dir", "z", "mode", "C", "val_acc", "val_bal", "val_hmean",
+        "val_loss", "test_acc", "test_bal", "test_hmean",
+    ]
     print("\t".join(cols))
     for r in rows:
         print(
@@ -99,8 +131,10 @@ def main():
             f"{r['best_val_acc']}\t"
             f"{r['best_val_balanced']}\t"
             f"{r['best_val_hmean']}\t"
+            f"{r['best_val_loss']}\t"
             f"{r['test_acc']}\t"
-            f"{r['test_balanced']}"
+            f"{r['test_balanced']}\t"
+            f"{r['test_hmean']}"
         )
     print(f"\n# n={len(rows)}  glob={args.glob}  cwd={root}", file=sys.stderr)
 

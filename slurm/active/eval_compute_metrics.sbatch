@@ -8,8 +8,10 @@
 #SBATCH -o /scratch/jw310/adni-dttvit/runs/logs/eval_compute_metrics_%j.out
 #SBATCH -e /scratch/jw310/adni-dttvit/runs/logs/eval_compute_metrics_%j.err
 
-# Evaluate accuracy + inference time + speedup + GFLOPs for all configs.
-# Run after: baseline, compare_ablation, compare_dtt_only, compare_thin_methods, teacher_student
+# Inference **compute** table: test acc, AUROC, ms/sample, speedup (vs first model in list),
+# avg_exit (early-exit), params, peak GPU MB, GFLOPs -> results/compute_metrics.csv + .md
+# Training does NOT write these; run this after you have best.pt under each run dir.
+# Default dirs in run_eval_compute_metrics.py are ordered for stack3 z115 mainline first.
 
 set -euo pipefail
 
