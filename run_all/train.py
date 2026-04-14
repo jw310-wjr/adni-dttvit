@@ -12,6 +12,8 @@ import math
 import time
 from typing import List, Optional, Tuple
 
+from torch.utils.tensorboard import SummaryWriter
+
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
@@ -329,11 +331,67 @@ def parse_args():
         help="Use randomly initialized ViT (no ImageNet weights). For offline/air-gapped runs."
     )
 
+    # ---- K-fold cross-validation ----
+    p.add_argument(
+        "--kfold",
+        type=int,
+        default=0,
+        help="K-fold cross-validation on train+val combined (0=disabled). "
+             "Each fold trains from scratch; final output is mean±std across folds. "
+             "Per-fold checkpoints saved to {out_dir}/fold_{k}/.",
+    )
+    p.add_argument(
+        "--kfold_csv",
+        default=None,
+        help="CSV to use as the pool for k-fold splits (default: combines train.csv + val.csv). "
+             "Rows are split with StratifiedKFold on the label column.",
+    )
+
     return p.parse_args()
 
 
 def parse_label_map(s: str):
     return {k: int(v) for k, v in (x.split("=") for x in s.split(","))}
+
+
+def _label_col_from_fields(fields) -> str:
+    for c in ("label", "Group", "group"):
+        if c in fields:
+            return c
+    raise ValueError(f"No label column (label/Group/group) in fields: {list(fields)}")
+
+
+def train_class_counts_from_df(df, label_map: dict, num_classes: int) -> Tuple[List[int], int]:
+    """DataFrame version of train_class_counts_from_csv."""
+    label_col = _label_col_from_fields(df.columns)
+    counts = [0] * num_classes
+    for y_raw in df[label_col]:
+        y = int(label_map[str(y_raw).strip()])
+        counts[y] += 1
+    n = len(df)
+    if n == 0:
+        raise ValueError("Empty training DataFrame")
+    if any(c == 0 for c in counts):
+        raise ValueError(f"Missing some classes in DataFrame: counts={counts}")
+    return counts, n
+
+
+def ce_class_weight_tensor_df(df, label_map: dict, num_classes: int, device) -> Tuple[torch.Tensor, List[int]]:
+    counts, n = train_class_counts_from_df(df, label_map, num_classes)
+    w = [n / (num_classes * c) for c in counts]
+    return torch.tensor(w, dtype=torch.float32, device=device), counts
+
+
+def per_sample_inv_freq_weights_df(df, label_map: dict, num_classes: int) -> List[float]:
+    """DataFrame version of per_sample_inv_freq_weights."""
+    label_col = _label_col_from_fields(df.columns)
+    ys = [int(label_map[str(r).strip()]) for r in df[label_col]]
+    counts = [0] * num_classes
+    for y in ys:
+        counts[y] += 1
+    if any(c == 0 for c in counts):
+        raise ValueError(f"Missing class in DataFrame: counts={counts}")
+    return [1.0 / counts[y] for y in ys]
 
 
 def train_class_counts_from_csv(train_csv: str, label_map: dict, num_classes: int) -> Tuple[List[int], int]:
@@ -740,63 +798,57 @@ def append_log(
         ])
 
 
-def main():
-    args = parse_args()
-    if args.ce_class_weights == "auto" and args.train_sampler == "balanced":
-        raise ValueError(
-            "Do not combine --ce_class_weights auto with --train_sampler balanced "
-            "(double imbalance correction). Use shuffle + auto, or balanced + --ce_class_weights none."
-        )
-    set_seed(args.seed)
-
-    label_map = parse_label_map(args.label_map)
-    num_classes = len(label_map)
-
-    device = get_device()
-
-    train_csv = os.path.join(args.manifest_dir, "train.csv")
-    val_csv = os.path.join(args.manifest_dir, "val.csv")
-    test_csv = os.path.join(args.manifest_dir, "test.csv")
-
-    # ---- choose dataset by input_type ----
-    vit_in_chans = 1
+def _build_datasets_from_df(args, train_df, val_df, test_csv, label_map):
+    """Build train/val/test datasets. train_df/val_df are DataFrames; test_csv is a file path."""
+    import pandas as pd
     if args.input_type == "npy":
-        train_ds = ADNINPY2DDataset(train_csv, label_map=label_map, data_root=args.data_root)
-        val_ds   = ADNINPY2DDataset(val_csv,   label_map=label_map, data_root=args.data_root)
-        test_ds  = ADNINPY2DDataset(test_csv,  label_map=label_map, data_root=args.data_root)
+        train_ds = ADNINPY2DDataset(df=train_df, label_map=label_map, data_root=args.data_root)
+        val_ds   = ADNINPY2DDataset(df=val_df,   label_map=label_map, data_root=args.data_root)
+        test_ds  = ADNINPY2DDataset(test_csv,    label_map=label_map, data_root=args.data_root)
+        vit_in_chans = 1
     else:
-        # ---- slice selector config passed into NIfTI Dataset ----
         slice_cfg = {"slice_selector": args.slice_selector, "data_root": args.data_root}
         if args.slice_selector == "entropy":
-            slice_cfg.update({
-                "num_bins": 256,
-                "entropy_topk": args.entropy_topk,
-            })
+            slice_cfg.update({"num_bins": 256, "entropy_topk": args.entropy_topk})
         elif args.slice_selector == "fixed":
             if args.z_frac is not None:
                 slice_cfg["z_frac"] = args.z_frac
             else:
-                slice_cfg["z_index"] = args.z_index  # default 77 (middle)
+                slice_cfg["z_index"] = args.z_index
         slice_cfg["slice_stack_mode"] = args.slice_stack_mode
         train_ds = Nii2DSliceDataset(
-            train_csv,
+            df=train_df,
             label_map=label_map,
             augment=args.train_aug,
             aug_translate=args.aug_translate,
             aug_noise=args.aug_noise,
             **slice_cfg,
         )
-        val_ds = Nii2DSliceDataset(val_csv, label_map=label_map, **slice_cfg)
+        val_ds = Nii2DSliceDataset(df=val_df, label_map=label_map, **slice_cfg)
         test_ds = Nii2DSliceDataset(test_csv, label_map=label_map, **slice_cfg)
         vit_in_chans = in_chans_for_slice_stack_mode(args.slice_stack_mode)
+    return train_ds, val_ds, test_ds, vit_in_chans
 
-    train_sampler = None
+
+def run_single_fold(args, train_df, val_df, test_csv, out_dir, device, label_map, num_classes):
+    """
+    Train one fold (or one normal run) given DataFrames for train/val and a CSV for test.
+    Returns a results dict with best_val_acc, best_val_balanced, test_acc, test_balanced, etc.
+    """
+    import pandas as pd
+
+    set_seed(args.seed)
+
+    train_ds, val_ds, test_ds, vit_in_chans = _build_datasets_from_df(
+        args, train_df, val_df, test_csv, label_map
+    )
+
+    # ---- samplers / loaders ----
+    train_class_counts = None
     if args.train_sampler == "balanced":
-        psw = per_sample_inv_freq_weights(train_csv, label_map, num_classes)
+        psw = per_sample_inv_freq_weights_df(train_df, label_map, num_classes)
         if len(psw) != len(train_ds):
-            raise RuntimeError(
-                f"Sampler length {len(psw)} != train_ds {len(train_ds)} (check train.csv rows)"
-            )
+            raise RuntimeError(f"Sampler length {len(psw)} != train_ds {len(train_ds)}")
         train_sampler = WeightedRandomSampler(
             weights=torch.as_tensor(psw, dtype=torch.double),
             num_samples=len(psw),
@@ -804,38 +856,24 @@ def main():
             generator=torch.Generator().manual_seed(args.seed),
         )
         train_loader = DataLoader(
-            train_ds,
-            batch_size=args.batch_size,
-            shuffle=False,
-            sampler=train_sampler,
-            num_workers=args.num_workers,
+            train_ds, batch_size=args.batch_size, shuffle=False,
+            sampler=train_sampler, num_workers=args.num_workers,
             pin_memory=(device.type == "cuda"),
         )
         print(f"Train sampler: balanced (WeightedRandomSampler, n={len(psw)})")
     else:
         train_loader = DataLoader(
-            train_ds,
-            batch_size=args.batch_size,
-            shuffle=True,
-            num_workers=args.num_workers,
-            pin_memory=(device.type == "cuda"),
+            train_ds, batch_size=args.batch_size, shuffle=True,
+            num_workers=args.num_workers, pin_memory=(device.type == "cuda"),
         )
         print("Train sampler: shuffle")
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda"),
-    )
-    test_loader = DataLoader(
-        test_ds,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda"),
-    )
 
+    val_loader  = DataLoader(val_ds,  batch_size=args.batch_size, shuffle=False,
+                             num_workers=args.num_workers, pin_memory=(device.type == "cuda"))
+    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False,
+                             num_workers=args.num_workers, pin_memory=(device.type == "cuda"))
+
+    # ---- model ----
     model = build_vit2d(
         num_classes=num_classes,
         thinning=args.thinning,
@@ -877,80 +915,34 @@ def main():
             p.requires_grad = False
         print(f"Teacher loaded from {args.teacher_ckpt} (frozen)")
 
-    # ---- inspect ViT depth ----
-    depth = None
-    if hasattr(model, "blocks"):
-        depth = len(model.blocks)
-    elif hasattr(model, "vit") and hasattr(model.vit, "blocks"):
-        depth = len(model.vit.blocks)
-
-    print(f"ViT depth (num blocks): {depth}")
-
-    ce_weight: Optional[torch.Tensor] = None
-    train_class_counts: Optional[List[int]] = None
+    # ---- class weights / criterion ----
+    ce_weight = None
     if args.ce_class_weights == "auto":
-        ce_weight, train_class_counts = ce_class_weight_tensor(
-            train_csv, label_map, num_classes, device
+        ce_weight, train_class_counts = ce_class_weight_tensor_df(
+            train_df, label_map, num_classes, device
         )
-        print(
-            f"CE class weights (auto, train counts): {train_class_counts} -> "
-            f"{ce_weight.detach().cpu().tolist()}"
-        )
-    criterion = nn.CrossEntropyLoss(
-        weight=ce_weight,
-        label_smoothing=args.label_smoothing,
-    )
+        print(f"CE class weights (auto, train counts): {train_class_counts} -> "
+              f"{ce_weight.detach().cpu().tolist()}")
+    criterion = nn.CrossEntropyLoss(weight=ce_weight, label_smoothing=args.label_smoothing)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     use_amp = args.amp and (device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
-    ensure_outdir(args.out_dir)
-    log_path = init_log(args.out_dir)
+    ensure_outdir(out_dir)
+    log_path = init_log(out_dir)
+    tb_writer = SummaryWriter(log_dir=os.path.join(out_dir, "logs", "tb"))
 
-    best_track = float("-inf")  # maximize; for loss metric use -val_loss
-    best_path = os.path.join(args.out_dir, "best.pt")
+    best_track  = float("-inf")
+    best_path   = os.path.join(out_dir, "best.pt")
     patience_ctr = 0
-    best_val_acc = -1.0
+    best_val_acc      = -1.0
     best_val_balanced = -1.0
-    best_val_loss = float("inf")
+    best_val_loss     = float("inf")
 
     print(f"Device: {device} | AMP: {use_amp}")
-    print(f"Train: {train_csv} (n={len(train_ds)})")
-    print(f"Val:   {val_csv} (n={len(val_ds)})")
-    print(f"Test:  {test_csv} (n={len(test_ds)})")
-    print(f"Saving to: {args.out_dir}")
-    if args.input_type == "nifti":
-        sel_info = f"Slice selector: {args.slice_selector}"
-        if args.slice_selector == "entropy":
-            sel_info += f" | entropy_topk={args.entropy_topk}"
-        elif args.slice_selector == "fixed":
-            sel_info += f" | z_index={args.z_index} | z_frac={args.z_frac}"
-        sel_info += f" | slice_stack_mode={args.slice_stack_mode} (in_chans={vit_in_chans})"
-        print(sel_info)
-    else:
-        print("Input: pre-extracted fixed-z 2D slices (.npy); slice selector not used.")
-
-    print(f"Thinning: {args.thinning} | method: {args.thin_method}")
-    print(
-        f"Early-exit (model): {getattr(model, 'enable_early_exit', False)} "
-        f"| alpha={args.alpha} beta={args.beta}"
-    )
-    print(
-        f"Regularization: weight_decay={args.weight_decay} label_smoothing={args.label_smoothing} "
-        f"| drop_path_rate={args.drop_path_rate} drop_rate={args.drop_rate} "
-        f"| ce_class_weights={args.ce_class_weights} | best_metric={args.best_metric} "
-        f"| early_stop: patience={args.early_stopping_patience} min_delta={args.early_stopping_min_delta} | "
-        f"lr_scheduler={args.lr_scheduler} warmup_epochs={args.warmup_epochs} "
-        f"(eta_min={args.lr * args.lr_min_ratio:.2e}) | "
-        f"train_sampler={args.train_sampler} | "
-        f"train_aug={args.train_aug} (translate={args.aug_translate}, "
-        f"noise={args.aug_noise}; no L-R flip, no rotation)"
-    )
-    if args.tau is not None:
-        print(f"Early-exit eval tau: {args.tau}")
-    if teacher is not None:
-        print(f"Distillation: temp={args.distill_temp} alpha={args.distill_alpha}")
+    print(f"Train: {len(train_ds)} samples | Val: {len(val_ds)} samples | Test: {len(test_ds)} samples")
+    print(f"Saving to: {out_dir}")
 
     use_distill = teacher is not None
 
@@ -959,37 +951,17 @@ def main():
         set_epoch_lr(optimizer, ep, args)
         if use_distill:
             train_loss, train_acc, train_balanced = train_one_epoch_distill(
-                model,
-                teacher,
-                train_loader,
-                optimizer,
-                criterion,
-                device,
-                temp=args.distill_temp,
-                alpha=args.distill_alpha,
-                scaler=scaler,
-                early_exit=args.early_exit,
-                alpha_ee=args.alpha,
-                beta_ee=args.beta,
-                lambda_feat=args.lambda_feat,
-                lambda_anatomy=args.lambda_anatomy,
-                lambda_sparse=args.lambda_sparse,
-                num_classes=num_classes,
+                model, teacher, train_loader, optimizer, criterion, device,
+                temp=args.distill_temp, alpha=args.distill_alpha, scaler=scaler,
+                early_exit=args.early_exit, alpha_ee=args.alpha, beta_ee=args.beta,
+                lambda_feat=args.lambda_feat, lambda_anatomy=args.lambda_anatomy,
+                lambda_sparse=args.lambda_sparse, num_classes=num_classes,
             )
         else:
             train_loss, train_acc, train_balanced = train_one_epoch(
-                model,
-                train_loader,
-                optimizer,
-                criterion,
-                device,
-                num_classes,
-                scaler=scaler,
-                early_exit=args.early_exit,
-                alpha=args.alpha,
-                beta=args.beta,
-                lambda_anatomy=args.lambda_anatomy,
-                lambda_sparse=args.lambda_sparse,
+                model, train_loader, optimizer, criterion, device, num_classes,
+                scaler=scaler, early_exit=args.early_exit, alpha=args.alpha, beta=args.beta,
+                lambda_anatomy=args.lambda_anatomy, lambda_sparse=args.lambda_sparse,
             )
 
         if args.tau is None:
@@ -998,13 +970,8 @@ def main():
             )
         else:
             val_acc, exit_counts, avg_exit, val_loss, val_balanced = evaluate(
-                model,
-                val_loader,
-                device,
-                tau=args.tau,
-                tau_u=args.tau_u,
-                criterion=criterion,
-                num_classes=num_classes,
+                model, val_loader, device,
+                tau=args.tau, tau_u=args.tau_u, criterion=criterion, num_classes=num_classes,
             )
             print(f"[val early-exit] tau={args.tau} exit_counts={exit_counts} avg_exit={avg_exit:.3f}")
 
@@ -1018,15 +985,12 @@ def main():
             track_now = -float(val_loss)
 
         md = args.early_stopping_min_delta
-        if best_track == float("-inf"):
-            improved = True
-        else:
-            improved = track_now > best_track + md
+        improved = (best_track == float("-inf")) or (track_now > best_track + md)
         if improved:
-            best_track = track_now
-            best_val_acc = val_acc
+            best_track        = track_now
+            best_val_acc      = val_acc
             best_val_balanced = val_balanced
-            best_val_loss = float(val_loss)
+            best_val_loss     = float(val_loss)
             torch.save(model.state_dict(), best_path)
             patience_ctr = 0
         elif args.early_stopping_patience > 0:
@@ -1035,107 +999,196 @@ def main():
         dt = time.time() - t0
         lr_cur = optimizer.param_groups[0]["lr"]
         val_hm = val_hmean_acc_balanced(val_acc, val_balanced)
-        if args.tau is None:
-            print(
-                f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} train_balanced={train_balanced:.4f} "
-                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_hmean={val_hm:.4f} "
-                f"val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
-            )
-        else:
-            print(
-                f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} train_balanced={train_balanced:.4f} "
-                f"val_acc={val_acc:.4f} val_balanced={val_balanced:.4f} val_hmean={val_hm:.4f} "
-                f"val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
-            )
-        append_log(
-            log_path, ep, train_loss, train_acc, train_balanced, val_acc, val_balanced, val_loss
+        print(
+            f"[epoch {ep}] train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
+            f"train_balanced={train_balanced:.4f} val_acc={val_acc:.4f} "
+            f"val_balanced={val_balanced:.4f} val_hmean={val_hm:.4f} "
+            f"val_loss={val_loss:.4f} lr={lr_cur:.2e} time={dt:.1f}s"
         )
+        append_log(log_path, ep, train_loss, train_acc, train_balanced, val_acc, val_balanced, val_loss)
+        tb_writer.add_scalars("loss", {"train": train_loss, "val": val_loss}, ep)
+        tb_writer.add_scalars("acc",  {"train": train_acc,  "val": val_acc},  ep)
+        tb_writer.add_scalars("acc_balanced", {"train": train_balanced, "val": val_balanced}, ep)
+        tb_writer.add_scalar("lr", lr_cur, ep)
 
         if args.early_stopping_patience > 0 and patience_ctr >= args.early_stopping_patience:
-            print(
-                f"Early stopping at epoch {ep} (no {args.best_metric} improvement for "
-                f"{args.early_stopping_patience} epochs)"
-            )
+            print(f"Early stopping at epoch {ep} (no {args.best_metric} improvement for "
+                  f"{args.early_stopping_patience} epochs)")
             break
 
-    # final test
+    # ---- final test evaluation ----
     model.load_state_dict(torch.load(best_path, map_location=device))
     if args.tau is None:
         test_acc, test_balanced = evaluate(model, test_loader, device, num_classes=num_classes)
-        print(
-            f"Done. best.checkpoint: val_acc={best_val_acc:.4f} val_balanced={best_val_balanced:.4f} "
-            f"val_loss={best_val_loss:.4f} | test_acc={test_acc:.4f} test_balanced={test_balanced:.4f}"
-        )
+        print(f"Done. best val_acc={best_val_acc:.4f} val_balanced={best_val_balanced:.4f} "
+              f"val_loss={best_val_loss:.4f} | test_acc={test_acc:.4f} test_balanced={test_balanced:.4f}")
     else:
         test_acc, exit_counts, avg_exit, test_balanced = evaluate(
-            model,
-            test_loader,
-            device,
-            tau=args.tau,
-            tau_u=args.tau_u,
-            num_classes=num_classes,
+            model, test_loader, device, tau=args.tau, tau_u=args.tau_u, num_classes=num_classes
         )
-        print(
-            f"Done. best val_acc={best_val_acc:.4f} val_balanced={best_val_balanced:.4f} "
-            f"test_acc={test_acc:.4f} test_balanced={test_balanced:.4f} (early-exit tau={args.tau})"
-        )
+        print(f"Done. best val_acc={best_val_acc:.4f} val_balanced={best_val_balanced:.4f} "
+              f"test_acc={test_acc:.4f} test_balanced={test_balanced:.4f} (early-exit tau={args.tau})")
         print(f"Exit counts: {exit_counts} | Avg exit: {avg_exit:.3f}")
 
-    print(f"Best checkpoint: {best_path}")
-    print(f"Log: {log_path}")
+    tb_writer.close()
 
-    # save results.json for run_slice_selection.py / run_compare_thin_methods.py
     results = {
-        "best_val_acc": best_val_acc,
+        "best_val_acc":      best_val_acc,
         "best_val_balanced": best_val_balanced,
-        "best_val_hmean": val_hmean_acc_balanced(best_val_acc, best_val_balanced),
-        "best_val_loss": best_val_loss,
-        "best_metric": args.best_metric,
-        "test_acc": test_acc,
-        "test_balanced": test_balanced,
-        "test_hmean": val_hmean_acc_balanced(test_acc, test_balanced),
-        "slice_selector": args.slice_selector,
-        "z_index": args.z_index,
-        "z_frac": args.z_frac,
-        "slice_stack_mode": args.slice_stack_mode,
-        "in_chans": vit_in_chans,
-        "thinning": args.thinning,
-        "thin_method": args.thin_method,
-        "gumbel_tau": args.gumbel_tau,
-        "early_exit": args.early_exit,
-        "tau": args.tau,
-        "tau_u": args.tau_u,
-        "use_anatomical_prior": args.use_anatomical_prior,
-        "anatomical_prior_path": args.anatomical_prior_path,
-        "anatomical_prior_slice": args.anatomical_prior_slice,
-        "distill": args.teacher_ckpt is not None,
-        "teacher_ckpt": args.teacher_ckpt,
-        "distill_temp": args.distill_temp,
-        "distill_alpha": args.distill_alpha,
-        "lambda_feat": args.lambda_feat,
-        "lr": args.lr,
-        "weight_decay": args.weight_decay,
-        "epochs": args.epochs,
-        "label_smoothing": args.label_smoothing,
-        "ce_class_weights": args.ce_class_weights,
+        "best_val_hmean":    val_hmean_acc_balanced(best_val_acc, best_val_balanced),
+        "best_val_loss":     best_val_loss,
+        "best_metric":       args.best_metric,
+        "test_acc":          test_acc,
+        "test_balanced":     test_balanced,
+        "test_hmean":        val_hmean_acc_balanced(test_acc, test_balanced),
+        "slice_selector":    args.slice_selector,
+        "z_index":           args.z_index,
+        "z_frac":            args.z_frac,
+        "slice_stack_mode":  args.slice_stack_mode,
+        "in_chans":          vit_in_chans,
+        "thinning":          args.thinning,
+        "thin_method":       args.thin_method,
+        "gumbel_tau":        args.gumbel_tau,
+        "early_exit":        args.early_exit,
+        "tau":               args.tau,
+        "tau_u":             args.tau_u,
+        "use_anatomical_prior":    args.use_anatomical_prior,
+        "anatomical_prior_path":   args.anatomical_prior_path,
+        "anatomical_prior_slice":  args.anatomical_prior_slice,
+        "distill":           args.teacher_ckpt is not None,
+        "teacher_ckpt":      args.teacher_ckpt,
+        "distill_temp":      args.distill_temp,
+        "distill_alpha":     args.distill_alpha,
+        "lambda_feat":       args.lambda_feat,
+        "lr":                args.lr,
+        "weight_decay":      args.weight_decay,
+        "epochs":            args.epochs,
+        "label_smoothing":   args.label_smoothing,
+        "ce_class_weights":  args.ce_class_weights,
         "train_class_counts": train_class_counts,
-        "ce_weight": ce_weight.detach().cpu().tolist() if ce_weight is not None else None,
-        "early_stopping_patience": args.early_stopping_patience,
+        "ce_weight":         ce_weight.detach().cpu().tolist() if ce_weight is not None else None,
+        "early_stopping_patience":  args.early_stopping_patience,
         "early_stopping_min_delta": args.early_stopping_min_delta,
-        "lr_scheduler": args.lr_scheduler,
-        "lr_min_ratio": args.lr_min_ratio,
-        "warmup_epochs": args.warmup_epochs,
-        "train_sampler": args.train_sampler,
-        "drop_path_rate": args.drop_path_rate,
-        "drop_rate": args.drop_rate,
-        "train_aug": args.train_aug,
-        "aug_translate": args.aug_translate,
-        "aug_noise": args.aug_noise,
+        "lr_scheduler":      args.lr_scheduler,
+        "lr_min_ratio":      args.lr_min_ratio,
+        "warmup_epochs":     args.warmup_epochs,
+        "train_sampler":     args.train_sampler,
+        "drop_path_rate":    args.drop_path_rate,
+        "drop_rate":         args.drop_rate,
+        "train_aug":         args.train_aug,
+        "aug_translate":     args.aug_translate,
+        "aug_noise":         args.aug_noise,
     }
-    results_path = os.path.join(args.out_dir, "results.json")
+    results_path = os.path.join(out_dir, "results.json")
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Results: {results_path}")
+    return results
+
+
+def run_kfold(args):
+    """5-fold (or K-fold) cross-validation over train+val combined."""
+    import pandas as pd
+    from sklearn.model_selection import StratifiedKFold
+
+    if args.ce_class_weights == "auto" and args.train_sampler == "balanced":
+        raise ValueError(
+            "Do not combine --ce_class_weights auto with --train_sampler balanced."
+        )
+
+    label_map  = parse_label_map(args.label_map)
+    num_classes = len(label_map)
+    device     = get_device()
+    test_csv   = os.path.join(args.manifest_dir, "test.csv")
+
+    # ---- load pool CSV ----
+    if args.kfold_csv:
+        pool_df = pd.read_csv(args.kfold_csv)
+    else:
+        train_csv = os.path.join(args.manifest_dir, "train.csv")
+        val_csv   = os.path.join(args.manifest_dir, "val.csv")
+        pool_df   = pd.concat([pd.read_csv(train_csv), pd.read_csv(val_csv)],
+                               ignore_index=True)
+
+    # Resolve label column for stratification
+    label_col = _label_col_from_fields(pool_df.columns)
+    labels = [int(label_map[str(v).strip()]) for v in pool_df[label_col]]
+
+    k = args.kfold
+    skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=args.seed)
+
+    fold_results = []
+    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(pool_df, labels)):
+        print(f"\n{'='*60}")
+        print(f"FOLD {fold_idx + 1}/{k}  (train={len(train_idx)}, val={len(val_idx)})")
+        print(f"{'='*60}")
+
+        train_df = pool_df.iloc[train_idx]
+        val_df   = pool_df.iloc[val_idx]
+        fold_dir = os.path.join(args.out_dir, f"fold_{fold_idx + 1}")
+
+        res = run_single_fold(
+            args, train_df, val_df, test_csv, fold_dir, device, label_map, num_classes
+        )
+        res["fold"] = fold_idx + 1
+        fold_results.append(res)
+
+    # ---- aggregate ----
+    import numpy as np
+    metrics = ["best_val_acc", "best_val_balanced", "best_val_hmean",
+               "test_acc", "test_balanced", "test_hmean"]
+
+    print(f"\n{'='*60}")
+    print(f"{k}-FOLD CROSS-VALIDATION SUMMARY")
+    print(f"{'='*60}")
+    summary = {}
+    for m in metrics:
+        vals = [r[m] for r in fold_results]
+        mean_v = float(np.mean(vals))
+        std_v  = float(np.std(vals))
+        summary[f"{m}_mean"] = mean_v
+        summary[f"{m}_std"]  = std_v
+        print(f"  {m:25s}: {mean_v:.4f} ± {std_v:.4f}  {[f'{v:.4f}' for v in vals]}")
+
+    summary["fold_results"] = fold_results
+    summary["kfold"] = k
+    summary["seed"]  = args.seed
+
+    cv_results_path = os.path.join(args.out_dir, "cv_results.json")
+    os.makedirs(args.out_dir, exist_ok=True)
+    with open(cv_results_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"\nCV results saved: {cv_results_path}")
+    return summary
+
+
+def main():
+    args = parse_args()
+
+    # ---- dispatch to k-fold if requested ----
+    if args.kfold > 0:
+        run_kfold(args)
+        return
+
+    if args.ce_class_weights == "auto" and args.train_sampler == "balanced":
+        raise ValueError(
+            "Do not combine --ce_class_weights auto with --train_sampler balanced "
+            "(double imbalance correction). Use shuffle + auto, or balanced + --ce_class_weights none."
+        )
+
+    import pandas as pd
+    label_map   = parse_label_map(args.label_map)
+    num_classes = len(label_map)
+    device      = get_device()
+
+    train_csv = os.path.join(args.manifest_dir, "train.csv")
+    val_csv   = os.path.join(args.manifest_dir, "val.csv")
+    test_csv  = os.path.join(args.manifest_dir, "test.csv")
+
+    train_df = pd.read_csv(train_csv)
+    val_df   = pd.read_csv(val_csv)
+
+    run_single_fold(args, train_df, val_df, test_csv, args.out_dir, device, label_map, num_classes)
 
 
 if __name__ == "__main__":

@@ -183,8 +183,9 @@ class Nii2DSliceDataset(Dataset):
 
     def __init__(
         self,
-        csv_path: str,
+        csv_path: str = "",
         *,
+        df: Optional[pd.DataFrame] = None,
         selector: Optional[SliceSelector] = None,
         cfg: Optional[Nii2DConfig] = None,
         label_map: Optional[Dict[str, int]] = None,
@@ -196,7 +197,7 @@ class Nii2DSliceDataset(Dataset):
         aug_noise: float = 0.03,
         **selector_kwargs,
     ):
-        self.df = pd.read_csv(csv_path)
+        self.df = df.reset_index(drop=True) if df is not None else pd.read_csv(csv_path)
         self.cfg = cfg or Nii2DConfig()
         if slice_stack_mode is not None:
             self.cfg.slice_stack_mode = slice_stack_mode

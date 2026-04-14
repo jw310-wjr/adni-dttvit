@@ -11,8 +11,8 @@ class ADNINPY2DDataset(Dataset):
     Read 2D slices saved as .npy from a manifest CSV.
     Required columns: npy_path, label (string: CN or AD for binary)
     """
-    def __init__(self, csv_path, label_map, data_root="."):
-        self.df = pd.read_csv(csv_path)
+    def __init__(self, csv_path="", label_map=None, data_root=".", df=None):
+        self.df = df.reset_index(drop=True) if df is not None else pd.read_csv(csv_path)
         self.data_root = data_root
         self.label_map = label_map
 
